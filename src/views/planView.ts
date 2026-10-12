@@ -24,6 +24,7 @@ import type { Ceiling, Column, Component, Dimension, Door, Element, ElementKind,
 import { componentFamily } from '../model/components';
 import type { PointerInfo, SnapKind, SnapResult, Tool } from '../tools/tool';
 import { createTool } from '../tools';
+import { RecordingContext, type VShape } from '../io/vector';
 
 /** Hauteur du plan de coupe au-dessus du niveau (convention Revit : 1,20 m). */
 export const CUT_HEIGHT = 1.2;
@@ -52,7 +53,7 @@ interface DrawStyle {
 
 export class PlanView {
   readonly canvas: HTMLCanvasElement;
-  readonly ctx: CanvasRenderingContext2D;
+  ctx: CanvasRenderingContext2D;
   cam = { cx: 5, cy: 4, scale: 50 };
   hoverId: Id | null = null;
   /** Calque courant (export DXF/SVG). */
@@ -164,7 +165,12 @@ export class PlanView {
 
   /** Tolérance de sélection exprimée en mètres. */
   px(n: number): number {
-    return n / this.cam.scale;
+    return (n * this.paperK) / this.cam.scale;
+  }
+
+  /** Facteur appliqué aux tailles exprimées en pixels écran (≈ 0,35 mm par pixel à l'export). */
+  get paperK(): number {
+    return this.exporting ? 0.35 : 1;
   }
 
   zoomExtents(): void {
@@ -428,6 +434,41 @@ export class PlanView {
   requestDraw(): void {
     cancelAnimationFrame(this.frame);
     this.frame = requestAnimationFrame(() => this.draw());
+  }
+
+  /**
+   * Enregistre le plan en vectoriel à l'échelle de la vue : 1 unité = 1 mm
+   * sur papier. Retourne aussi la conversion vers les coordonnées réelles (mm).
+   */
+  recordVector(): { shapes: VShape[]; toWorldMM: (q: Vec2) => Vec2; textScale: number } {
+    const rec = new RecordingContext(() => this.layer);
+    const saved = { ctx: this.ctx, cam: { ...this.cam }, w: this.width, h: this.height, dpr: this.dpr };
+    const k = 1000 / this.viewScale;
+    const pts: Vec2[] = [];
+    for (const e of this.visibleElements()) pts.push(...elementPoints(this.project, e));
+    const b = pts.length ? bounds(pts) : { min: v(0, 0), max: v(10, 10) };
+    const cx = (b.min.x + b.max.x) / 2;
+    const cy = (b.min.y + b.max.y) / 2;
+    const W = (b.max.x - b.min.x) * k + 60;
+    const H = (b.max.y - b.min.y) * k + 60;
+    try {
+      this.ctx = rec as unknown as CanvasRenderingContext2D;
+      this.cam = { cx, cy, scale: k };
+      this.width = W;
+      this.height = H;
+      this.dpr = 1;
+      this.exporting = true;
+      this.drawModel();
+    } finally {
+      this.ctx = saved.ctx;
+      this.cam = saved.cam;
+      this.width = saved.w;
+      this.height = saved.h;
+      this.dpr = saved.dpr;
+      this.exporting = false;
+    }
+    const toWorldMM = (q: Vec2): Vec2 => v(((q.x - W / 2) / k + cx) * 1000, ((H / 2 - q.y) / k + cy) * 1000);
+    return { shapes: rec.shapes, toWorldMM, textScale: this.viewScale };
   }
 
   /** Rendu dans un canevas hors écran pour l'export PNG. */
@@ -761,7 +802,7 @@ export class PlanView {
       const ctx = this.ctx;
       ctx.save();
       ctx.beginPath();
-      ctx.arc(s.x, s.y, 9, 0, Math.PI * 2);
+      ctx.arc(s.x, s.y, 9 * this.paperK, 0, Math.PI * 2);
       ctx.fillStyle = '#fff';
       ctx.fill();
       ctx.strokeStyle = color;
@@ -770,7 +811,7 @@ export class PlanView {
       ctx.restore();
       const tip = add(end, mul(look, size * 2.2));
       this.poly([add(end, mul(perp(look), size)), tip, sub(end, mul(perp(look), size))], { fill: color });
-      this.text(end, sc.name, { size: 10, bold: true, color });
+      this.text(end, sc.name.replace(/^Coupe\s*/, '') || sc.name, { size: 10 * this.paperK, bold: true, color });
     }
     void dir;
   }
@@ -838,7 +879,7 @@ export class PlanView {
   }
 
   private hatchWall(quad: Vec2[], dense: boolean): void {
-    if (this.cam.scale < 25) return;
+    if (this.cam.scale < 25 || this.exporting) return;
     const ctx = this.ctx;
     ctx.save();
     this.path(quad, true);
@@ -1066,7 +1107,7 @@ export class PlanView {
 
   drawGrid(g: Grid, color: string = COLORS.gridLine): void {
     this.line(g.a, g.b, color, 1, [14, 4, 3, 4]);
-    const r = 11;
+    const r = 11 * this.paperK;
     const dir = norm(sub(g.b, g.a));
     for (const [end, sgn] of [
       [g.a, -1],
@@ -1084,7 +1125,7 @@ export class PlanView {
       ctx.lineWidth = 1.2;
       ctx.stroke();
       ctx.restore();
-      this.text(c, g.label, { size: 12, bold: true, color });
+      this.text(c, g.label, { size: 12 * this.paperK, bold: true, color });
     }
   }
 

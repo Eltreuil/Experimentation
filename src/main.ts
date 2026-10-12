@@ -1,16 +1,17 @@
 import './styles.css';
 import { App, type ToolName } from './app';
-import { copySelection, paste, rotateSelection } from './commands';
+import { attachSelectedWalls, copySelection, paste } from './commands';
 import { autosave, download, downloadDataURL, loadAutosave, pickFile, readProjectFile, safeName } from './io/files';
 import { exportIFC } from './io/ifc';
 import { emptyProject, sampleProject } from './model/defaults';
 import { formatLength } from './model/project';
 import { ProjectBrowser } from './ui/browser';
-import { confirmDialog } from './ui/dialogs';
+import { confirmDialog, visibilityDialog } from './ui/dialogs';
 import { h } from './ui/dom';
 import { PropertiesPanel } from './ui/properties';
 import { Ribbon, type FileActions } from './ui/ribbon';
-import { ViewHost } from './views/viewHost';
+import { ViewHost, viewTitle } from './views/viewHost';
+import { printSVG, shapesToDXF, sheetSVG } from './io/vector';
 
 const app = new App(loadAutosave() ?? sampleProject());
 
@@ -35,7 +36,44 @@ document.getElementById('app')!.append(topbar, ribbonEl, h('div', { class: 'work
 const host = new ViewHost(app, viewEl);
 
 // --- Fichiers ----------------------------------------------------------------
+/** Feuille A3 (SVG) de la vue en plan active, avec cartouche. */
+function currentSheet(): string | null {
+  const plan = host.plan;
+  if (!plan) {
+    app.status('Ouvrez une vue en plan pour produire une feuille.');
+    return null;
+  }
+  const { shapes } = plan.recordVector();
+  const info = app.project.data.info ?? {};
+  const level = app.project.level(plan.levelId);
+  return sheetSVG(shapes, {
+    project: app.project.data.name,
+    view: `Plan ${level?.name ?? ''}`,
+    scale: plan.viewScale,
+    date: new Date().toLocaleDateString('fr-FR'),
+    ...info,
+  });
+}
+
 const files: FileActions = {
+  printSheet() {
+    const svg = currentSheet();
+    if (svg) printSVG(svg);
+  },
+  exportSheet() {
+    const svg = currentSheet();
+    if (svg) download(`${safeName(app.project.data.name)}_${safeName(viewTitle(app, app.view))}.svg`, svg, 'image/svg+xml');
+  },
+  exportDXF() {
+    const plan = host.plan;
+    if (!plan) {
+      app.status('Ouvrez une vue en plan pour l’exporter en DXF.');
+      return;
+    }
+    const { shapes, toWorldMM, textScale } = plan.recordVector();
+    download(`${safeName(app.project.data.name)}_${safeName(viewTitle(app, app.view))}.dxf`, shapesToDXF(shapes, toWorldMM, textScale), 'application/dxf');
+    app.status('Export DXF terminé (unités : mm, un calque par catégorie).');
+  },
   async newProject() {
     if (app.project.dirty && !(await confirmDialog('Nouveau projet', 'Les modifications non enregistrées seront perdues.', 'Continuer'))) return;
     app.load(emptyProject());
@@ -148,10 +186,30 @@ const SHORTCUTS: Record<string, ToolName | (() => void)> = {
   ES: 'stair',
   PI: 'room',
   CO: 'dimension',
+  CM: 'wallDimension',
   QU: 'grid',
   MO: 'select',
+  OU: 'opening',
+  TR: 'shaft',
+  FP: 'ceiling',
+  GC: 'railing',
+  CP: 'component',
+  TX: 'text',
+  CE: 'section',
+  ME: 'measure',
+  AL: 'align',
+  DE: 'offset',
+  AJ: 'trim',
+  PR: 'extend',
+  SC: 'split',
+  DP: 'move',
+  CC: 'copy',
+  RO: 'rotate',
+  SY: 'mirror',
+  RS: 'array',
   ZE: () => host.zoomExtents(),
-  RO: () => rotateSelection(app, 90),
+  VG: () => visibilityDialog(app),
+  AH: () => attachSelectedWalls(app),
 };
 let keyBuffer = '';
 let keyTimer = 0;

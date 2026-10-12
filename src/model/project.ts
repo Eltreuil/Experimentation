@@ -187,6 +187,8 @@ export class Project {
   }
 
   outline(w: Wall): WallOutline {
+    // Les éléments temporaires (aperçus, id commençant par « _ ») ne sont pas mis en cache.
+    if (w.id.startsWith('_')) return wallOutline(w, this.ofKind('wall', w.levelId), wallTypeThickness(this.data.wallTypes));
     if (!this.outlineCache) this.outlineCache = new Map();
     let o = this.outlineCache.get(w.id);
     if (!o) {

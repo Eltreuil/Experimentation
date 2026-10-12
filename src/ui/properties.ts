@@ -76,7 +76,7 @@ export class PropertiesPanel {
       if (!counts.size) c.append(h('div', { class: 'prop-empty' }, 'Aucun élément'));
       for (const [k, n] of counts) c.append(row(KIND_LABELS[k], readonlyField(String(n))));
     } else {
-      const titles = { '3d': 'Vue 3D', elevation: 'Élévation', schedule: 'Nomenclature' } as const;
+      const titles = { '3d': 'Vue 3D', elevation: 'Élévation', schedule: 'Nomenclature', section: 'Coupe' } as const;
       this.header(root, titles[v.kind]);
     }
     const proj = this.section(root, 'Projet');

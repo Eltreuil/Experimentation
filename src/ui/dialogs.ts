@@ -1,4 +1,5 @@
-import type { App } from '../app';
+import { viewKey, type App } from '../app';
+import { KIND_LABELS, type ElementKind, type ViewSettings } from '../model/types';
 import { addLevel, copyWallsToLevel, deleteLevel } from '../commands';
 import { newId } from '../model/project';
 import type { DoorType, WallType, WindowType } from '../model/types';
@@ -51,6 +52,36 @@ export function confirmDialog(title: string, message: string, ok = 'Confirmer'):
       ),
     );
     const close = modal(title, body, { onClose: () => finish(false) });
+  });
+}
+
+/** Demande une saisie de texte (remplace window.prompt, indisponible dans certaines intégrations). */
+export function promptDialog(title: string, label: string, value: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    let done = false;
+    const input = h('input', { type: 'text', class: 'prop-input', value });
+    const finish = (v: string | null) => {
+      if (done) return;
+      done = true;
+      close();
+      resolve(v);
+    };
+    input.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') finish(input.value.trim() || null);
+    });
+    const body = h(
+      'div',
+      {},
+      h('label', { class: 'prompt-label' }, label),
+      input,
+      h('div', { class: 'modal-actions' },
+        h('button', { class: 'btn', onclick: () => finish(null) }, 'Annuler'),
+        h('button', { class: 'btn primary', onclick: () => finish(input.value.trim() || null) }, 'OK'),
+      ),
+    );
+    const close = modal(title, body, { onClose: () => finish(null) });
+    setTimeout(() => input.focus(), 0);
   });
 }
 
@@ -184,6 +215,94 @@ export function typesDialog(app: App, initial: 'wall' | 'door' | 'window' = 'wal
   };
   render();
   modal('Types de familles', body, { wide: true });
+}
+
+/** Visibilité/Graphismes (VG) : catégories affichées, échelle et sous-couche de la vue active. */
+export function visibilityDialog(app: App): void {
+  const key = viewKey(app.view);
+  if (app.view.kind === 'schedule') {
+    app.status('Les nomenclatures n’ont pas de réglages de visibilité.');
+    return;
+  }
+  const p = app.project;
+  const isPlan = app.view.kind === 'plan';
+  const body = h('div');
+  const settings = (): ViewSettings => p.data.viewSettings?.[key] ?? {};
+  const update = (patch: Partial<ViewSettings>) =>
+    p.transact('Visibilité/Graphismes', (d) => {
+      d.viewSettings = d.viewSettings ?? {};
+      d.viewSettings[key] = { ...(d.viewSettings[key] ?? {}), ...patch };
+    });
+  const render = () => {
+    clear(body);
+    const hidden = new Set(settings().hidden ?? []);
+    const kinds = (Object.keys(KIND_LABELS) as ElementKind[]).filter((k) => isPlan || !['dimension', 'grid', 'room', 'text', 'section'].includes(k));
+    const grid = h('div', { class: 'vg-grid' });
+    for (const k of kinds) {
+      const c = h('input', { type: 'checkbox', checked: !hidden.has(k) });
+      c.addEventListener('change', () => {
+        const next = new Set(settings().hidden ?? []);
+        if (c.checked) next.delete(k);
+        else next.add(k);
+        update({ hidden: [...next] });
+      });
+      grid.append(h('label', { class: 'vg-item' }, c, KIND_LABELS[k]));
+    }
+    body.append(
+      h('h4', { style: 'margin-top:0' }, 'Catégories de modèle et d’annotation'),
+      grid,
+      h('div', { class: 'modal-actions left' },
+        h('button', { class: 'btn small', onclick: () => { update({ hidden: [] }); render(); } }, 'Tout afficher'),
+        h('button', { class: 'btn small', onclick: () => { update({ hidden: [...kinds] }); render(); } }, 'Tout masquer'),
+      ),
+    );
+    if (isPlan) {
+      const scales = [20, 50, 100, 200, 500].map((n) => ({ value: String(n), label: `1/${n}` }));
+      const und = h('input', { type: 'checkbox', checked: settings().underlay !== false });
+      und.addEventListener('change', () => update({ underlay: und.checked }));
+      body.append(
+        h('h4', {}, 'Vue'),
+        h('div', { class: 'inline-form' },
+          h('span', {}, 'Échelle'),
+          selectField(String(settings().scale ?? 100), scales, (v) => update({ scale: parseInt(v, 10) })),
+          h('label', { class: 'vg-item' }, und, 'Afficher le niveau inférieur en grisé'),
+        ),
+      );
+    }
+  };
+  render();
+  modal(`Visibilité/Graphismes — ${viewKeyLabel(app)}`, body, { wide: true });
+}
+
+function viewKeyLabel(app: App): string {
+  const v = app.view;
+  if (v.kind === 'plan') return `Plan : ${app.project.level(v.levelId)?.name ?? ''}`;
+  if (v.kind === '3d') return 'Vue 3D';
+  if (v.kind === 'elevation') return 'Élévation';
+  if (v.kind === 'section') return app.project.get<'section'>(v.sectionId)?.name ?? 'Coupe';
+  return '';
+}
+
+/** Informations du projet reprises dans le cartouche des feuilles. */
+export function projectInfoDialog(app: App): void {
+  const p = app.project;
+  const info = () => p.data.info ?? {};
+  const set = (k: keyof NonNullable<typeof p.data.info>, v: string) =>
+    p.transact('Informations du projet', (d) => {
+      d.info = { ...(d.info ?? {}), [k]: v || undefined };
+    });
+  const body = h(
+    'div',
+    {},
+    h('div', { class: 'prop-row' }, h('span', { class: 'prop-label' }, 'Nom du projet'), textField(p.data.name, (v) => p.transact('Nom du projet', (d) => (d.name = v || d.name)))),
+    h('div', { class: 'prop-row' }, h('span', { class: 'prop-label' }, 'Maître d’ouvrage'), textField(info().client ?? '', (v) => set('client', v))),
+    h('div', { class: 'prop-row' }, h('span', { class: 'prop-label' }, 'Adresse'), textField(info().address ?? '', (v) => set('address', v))),
+    h('div', { class: 'prop-row' }, h('span', { class: 'prop-label' }, 'Auteur'), textField(info().author ?? '', (v) => set('author', v))),
+    h('div', { class: 'prop-row' }, h('span', { class: 'prop-label' }, 'Numéro de projet'), textField(info().number ?? '', (v) => set('number', v))),
+    h('div', { class: 'prop-row' }, h('span', { class: 'prop-label' }, 'Phase'), textField(info().phase ?? '', (v) => set('phase', v))),
+    h('p', { class: 'muted' }, 'Ces informations apparaissent dans le cartouche des feuilles imprimées et exportées.'),
+  );
+  modal('Informations du projet', body);
 }
 
 export function helpDialog(): void {

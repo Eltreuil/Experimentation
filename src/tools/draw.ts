@@ -15,12 +15,15 @@ import {
 } from '../model/geometry';
 import { formatLength, newId, parseLength } from '../model/project';
 import { detectRoom } from '../model/rooms';
-import type { Column, Dimension, Door, Grid, Id, Room, Stair, Vec2, Wall, Window } from '../model/types';
+import type { Ceiling, Column, Component, Dimension, Door, Grid, Id, Railing, Room, Section, Shaft, Stair, TextNote, Vec2, Wall, WallOpening, Window } from '../model/types';
+import { componentFamily } from '../model/components';
+import { nextSectionName, wallChainPoints } from '../model/edit';
+import { promptDialog } from '../ui/dialogs';
 import type { PlanView } from '../views/planView';
 import type { PointerInfo, Tool } from './tool';
 
 /** Saisie clavier d'une longueur pendant un tracé (ex. « 450 » puis Entrée). */
-class LengthInput {
+export class LengthInput {
   buffer = '';
   constructor(private view: PlanView) {}
 
@@ -229,13 +232,15 @@ export class OpeningTool implements Tool {
 
   constructor(
     private view: PlanView,
-    private kind: 'door' | 'window',
+    private kind: 'door' | 'window' | 'opening',
   ) {
-    this.hint = `${kind === 'door' ? 'Porte' : 'Fenêtre'} : survolez un mur et cliquez pour placer. Le côté du curseur détermine l'ouverture.`;
+    const label = { door: 'Porte', window: 'Fenêtre', opening: 'Ouverture' }[kind];
+    this.hint = `${label} : survolez un mur et cliquez pour placer. Le côté du curseur détermine l'ouverture.`;
   }
 
   private width(): number {
     const o = this.view.app.options;
+    if (this.kind === 'opening') return o.openingWidth;
     return this.kind === 'door' ? this.view.project.doorType(o.doorTypeId).width : this.view.project.windowType(o.windowTypeId).width;
   }
 
@@ -274,8 +279,10 @@ export class OpeningTool implements Tool {
     if (!pv || !pv.valid) return;
     const proj = this.view.project;
     const o = this.view.app.options;
-    proj.transact(this.kind === 'door' ? 'Porte' : 'Fenêtre', () => {
-      if (this.kind === 'door') {
+    proj.transact({ door: 'Porte', window: 'Fenêtre', opening: 'Ouverture' }[this.kind], () => {
+      if (this.kind === 'opening') {
+        proj.add<WallOpening>({ id: newId('o'), kind: 'opening', hostId: pv.wall.id, offset: pv.offset, width: o.openingWidth, height: o.openingHeight, sill: o.openingSill });
+      } else if (this.kind === 'door') {
         proj.add<Door>({
           id: newId('d'),
           kind: 'door',
@@ -308,7 +315,9 @@ export class OpeningTool implements Tool {
     const color = pv.valid ? this.view.colors.select : '#d93025';
     const style = { stroke: color, width: 1.5, fill: pv.valid ? 'rgba(26,115,232,0.15)' : 'rgba(217,48,37,0.15)' };
     const o = this.view.app.options;
-    if (this.kind === 'door') {
+    if (this.kind === 'opening') {
+      this.view.drawOpening({ id: '_p', kind: 'opening', hostId: pv.wall.id, offset: pv.offset, width: o.openingWidth, height: o.openingHeight, sill: 0 }, style);
+    } else if (this.kind === 'door') {
       this.view.drawDoor({ id: '_p', kind: 'door', hostId: pv.wall.id, typeId: o.doorTypeId, offset: pv.offset, flipHand: false, flipFacing: pv.facing }, style);
     } else {
       const t = this.view.project.windowType(o.windowTypeId);
@@ -334,11 +343,18 @@ export class SketchTool implements Tool {
 
   constructor(
     private view: PlanView,
-    private kind: 'floor' | 'roof' | 'room',
+    private kind: 'floor' | 'roof' | 'room' | 'shaft' | 'ceiling' | 'railing',
   ) {
     this.input = new LengthInput(view);
-    const label = { floor: 'Sol', roof: 'Toit', room: 'Pièce' }[kind];
-    this.hint = `${label} : cliquez les sommets du contour. Cliquez le premier point, double-cliquez ou Entrée pour fermer.`;
+    const label = { floor: 'Sol', roof: 'Toit', room: 'Pièce', shaft: 'Trémie', ceiling: 'Faux-plafond', railing: 'Garde-corps' }[kind];
+    this.hint =
+      kind === 'railing'
+        ? 'Garde-corps : cliquez les points du tracé. Double-clic ou Entrée pour terminer.'
+        : `${label} : cliquez les sommets du contour. Cliquez le premier point, double-cliquez ou Entrée pour fermer.`;
+  }
+
+  private get open(): boolean {
+    return this.kind === 'railing';
   }
 
   anchor(): Vec2 | null {
@@ -346,7 +362,7 @@ export class SketchTool implements Tool {
   }
 
   onDown(p: PointerInfo): void {
-    if (this.pts.length >= 3 && dist(p.point, this.pts[0]) < this.view.px(8)) {
+    if (!this.open && this.pts.length >= 3 && dist(p.point, this.pts[0]) < this.view.px(8)) {
       this.finish();
       return;
     }
@@ -384,10 +400,23 @@ export class SketchTool implements Tool {
   private finish(): void {
     const pts = this.pts.filter((p, i, arr) => i === 0 || dist(p, arr[i - 1]) > 1e-4);
     this.pts = [];
-    if (pts.length < 3 || Math.abs(polygonArea(pts)) < 1e-4) return;
     const proj = this.view.project;
     const o = this.view.app.options;
     const levelId = this.view.levelId;
+    if (this.open) {
+      if (pts.length < 2) return;
+      proj.transact('Garde-corps', () => proj.add<Railing>({ id: newId('gc'), kind: 'railing', levelId, points: pts, height: o.railingHeight, baseOffset: 0 }));
+      return;
+    }
+    if (pts.length < 3 || Math.abs(polygonArea(pts)) < 1e-4) return;
+    if (this.kind === 'shaft') {
+      proj.transact('Trémie', () => proj.add<Shaft>({ id: newId('tr'), kind: 'shaft', levelId, points: pts, height: o.shaftHeight }));
+      return;
+    }
+    if (this.kind === 'ceiling') {
+      proj.transact('Faux-plafond', () => proj.add<Ceiling>({ id: newId('fp'), kind: 'ceiling', levelId, points: pts, height: o.ceilingHeight, thickness: 0.02 }));
+      return;
+    }
     if (this.kind === 'floor') {
       proj.transact('Sol', () => proj.add({ id: newId('s'), kind: 'floor', levelId, points: pts, thickness: o.floorThickness, offset: 0 }));
     } else if (this.kind === 'roof') {
@@ -411,7 +440,11 @@ export class SketchTool implements Tool {
   draw(): void {
     if (!this.pts.length) return;
     const pts = this.cursor ? [...this.pts, this.cursor] : this.pts;
-    this.view.poly(pts, { stroke: this.view.colors.select, width: 1.5, fill: 'rgba(26,115,232,0.1)' }, [6, 3]);
+    if (this.open) {
+      for (let i = 0; i < pts.length - 1; i++) this.view.line(pts[i], pts[i + 1], this.view.colors.select, 2);
+    } else {
+      this.view.poly(pts, { stroke: this.view.colors.select, width: 1.5, fill: 'rgba(26,115,232,0.1)' }, [6, 3]);
+    }
     for (const p of this.pts) this.view.drawGrip(p);
     const last = this.pts[this.pts.length - 1];
     if (this.cursor) this.view.drawTempDimension(last, this.cursor, 20);
@@ -425,12 +458,28 @@ export class RoomTool implements Tool {
   private hover: Vec2[] | null = null;
   private lastProbe = 0;
 
-  constructor(private view: PlanView) {
-    this.sketch = new SketchTool(view, 'room');
-    this.hint =
-      view.app.options.roomMode === 'auto'
-        ? 'Pièce : cliquez à l’intérieur d’un espace fermé par des murs.'
-        : this.sketch.hint;
+  constructor(
+    private view: PlanView,
+    private kind: 'room' | 'ceiling' = 'room',
+  ) {
+    this.sketch = new SketchTool(view, kind);
+    const label = kind === 'room' ? 'Pièce' : 'Faux-plafond';
+    this.hint = view.app.options.roomMode === 'auto' ? `${label} : cliquez à l’intérieur d’un espace fermé par des murs.` : this.sketch.hint;
+  }
+
+  private existing(q: Vec2): boolean {
+    return this.view.project.ofKind(this.kind, this.view.levelId).some((r) => r.points.length > 2 && pointIn(q, r.points));
+  }
+
+  private create(pts: Vec2[]): void {
+    const proj = this.view.project;
+    const levelId = this.view.levelId;
+    if (this.kind === 'room') {
+      proj.transact('Pièce', () => proj.add<Room>({ id: newId('r'), kind: 'room', levelId, points: pts, name: 'Pièce', number: proj.nextRoomNumber() }));
+    } else {
+      const o = this.view.app.options;
+      proj.transact('Faux-plafond', () => proj.add<Ceiling>({ id: newId('fp'), kind: 'ceiling', levelId, points: pts, height: o.ceilingHeight, thickness: 0.02 }));
+    }
   }
 
   private get auto(): boolean {
@@ -448,23 +497,20 @@ export class RoomTool implements Tool {
     if (now - this.lastProbe < 120) return;
     this.lastProbe = now;
     const proj = this.view.project;
-    const existing = proj.ofKind('room', this.view.levelId).some((r) => r.points.length > 2 && pointIn(p.raw, r.points));
+    const existing = this.existing(p.raw);
     this.hover = existing ? null : detectRoom(proj, this.view.levelId, p.raw);
-    this.view.app.status(existing ? 'Une pièce existe déjà ici.' : this.hover ? 'Cliquez pour créer la pièce.' : 'Espace non fermé.');
+    this.view.app.status(existing ? 'Un élément existe déjà ici.' : this.hover ? 'Cliquez pour créer l’élément.' : 'Espace non fermé.');
   }
 
   onDown(p: PointerInfo): void {
     if (!this.auto) return this.sketch.onDown(p);
-    const proj = this.view.project;
-    if (proj.ofKind('room', this.view.levelId).some((r) => pointIn(p.raw, r.points))) return;
-    const pts = detectRoom(proj, this.view.levelId, p.raw);
+    if (this.existing(p.raw)) return;
+    const pts = detectRoom(this.view.project, this.view.levelId, p.raw);
     if (!pts) {
-      this.view.app.status('Impossible de créer une pièce : l’espace n’est pas fermé par des murs.');
+      this.view.app.status('Impossible : l’espace n’est pas fermé par des murs.');
       return;
     }
-    proj.transact('Pièce', () =>
-      proj.add<Room>({ id: newId('r'), kind: 'room', levelId: this.view.levelId, points: pts, name: 'Pièce', number: proj.nextRoomNumber() }),
-    );
+    this.create(pts);
     this.hover = null;
   }
 
@@ -678,5 +724,130 @@ export class GridTool extends TwoPointTool {
 
   draw(): void {
     if (this.start && this.cursor) this.view.line(this.start, this.cursor, '#3e7cb1', 1.2, [14, 4, 3, 4]);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Composants (mobilier, sanitaires…)
+
+export class ComponentTool implements Tool {
+  readonly hint = 'Composant : cliquez pour placer. Barre d’espace : rotation de 90°.';
+  private cursor: Vec2 | null = null;
+  private rotation = 0;
+
+  constructor(private view: PlanView) {}
+
+  private make(pos: Vec2): Component {
+    const fam = componentFamily(this.view.app.options.componentFamily);
+    return { id: newId('cp'), kind: 'component', levelId: this.view.levelId, family: fam.id, pos, rotation: this.rotation, width: fam.width, depth: fam.depth, height: fam.height };
+  }
+
+  onMove(p: PointerInfo): void {
+    this.cursor = p.point;
+  }
+
+  onDown(p: PointerInfo): void {
+    const proj = this.view.project;
+    const c = this.make(p.point);
+    proj.transact('Composant', () => proj.add(c));
+  }
+
+  onKey(e: KeyboardEvent): boolean {
+    if (e.key === ' ') {
+      this.rotation = (this.rotation + 90) % 360;
+      return true;
+    }
+    return false;
+  }
+
+  draw(): void {
+    if (this.cursor) this.view.drawComponent(this.make(this.cursor), { stroke: this.view.colors.select, width: 1.2, fill: 'rgba(26,115,232,0.12)' });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Texte
+
+export class TextTool implements Tool {
+  readonly hint = 'Texte : cliquez pour placer une note de texte.';
+  private busy = false;
+
+  constructor(private view: PlanView) {}
+
+  async onDown(p: PointerInfo): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
+    const text = await promptDialog('Texte', 'Contenu de la note :', '');
+    this.busy = false;
+    if (!text) return;
+    const proj = this.view.project;
+    const note: TextNote = { id: newId('tx'), kind: 'text', levelId: this.view.levelId, pos: p.point, text, size: this.view.app.options.textSize, rotation: 0 };
+    proj.transact('Texte', () => proj.add(note));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Coupe
+
+export class SectionTool extends TwoPointTool {
+  readonly hint = 'Coupe : cliquez le début puis la fin de la ligne de coupe. La vue regarde à droite du tracé.';
+
+  protected create(a: Vec2, b: Vec2): void {
+    const p = this.view.project;
+    const sc: Section = { id: newId('cp'), kind: 'section', name: nextSectionName(p), a, b, depth: 20, flip: false };
+    p.transact('Coupe', () => p.add(sc));
+    this.view.app.status(`${sc.name} créée : ouvrez-la depuis l’arborescence (Coupes).`);
+  }
+
+  draw(): void {
+    if (this.start && this.cursor && dist(this.start, this.cursor) > 0.05) {
+      this.view.drawSection({ id: '_s', kind: 'section', name: '?', a: this.start, b: this.cursor, depth: 20, flip: false }, this.view.colors.select);
+    }
+  }
+}
+
+/** Cotes en chaîne d'un mur (extrémités et ouvertures), placées du côté du curseur. */
+export class WallDimensionTool implements Tool {
+  readonly hint = 'Cote de mur : survolez un mur et cliquez pour coter ses extrémités et ses ouvertures (côté du curseur).';
+  private hover: { wall: Wall; side: 1 | -1 } | null = null;
+
+  constructor(private view: PlanView) {}
+
+  private chain(): { pts: Vec2[]; offset: number } | null {
+    if (!this.hover) return null;
+    const { wall, side } = this.hover;
+    const pts = wallChainPoints(this.view.project, wall, side);
+    // Les cotes sont orientées a→b ; leur décalage positif est à gauche.
+    return { pts, offset: side * 0.6 };
+  }
+
+  onMove(p: PointerInfo): void {
+    const proj = this.view.project;
+    let best: { w: Wall; d: number } | null = null;
+    for (const w of proj.ofKind('wall', this.view.levelId)) {
+      const pr = projectOnSegment(p.raw, w.a, w.b);
+      if (pr.dist < proj.thickness(w) / 2 + this.view.px(14) && (!best || pr.dist < best.d)) best = { w, d: pr.dist };
+    }
+    this.hover = best ? { wall: best.w, side: dot(sub(p.raw, best.w.a), perp(wallDir(best.w))) >= 0 ? 1 : -1 } : null;
+  }
+
+  onDown(): void {
+    const c = this.chain();
+    if (!c || c.pts.length < 2) return;
+    const proj = this.view.project;
+    const levelId = this.view.levelId;
+    proj.transact('Cotes du mur', () => {
+      for (let i = 0; i < c.pts.length - 1; i++) {
+        proj.add<Dimension>({ id: newId('dim'), kind: 'dimension', levelId, a: c.pts[i], b: c.pts[i + 1], offset: c.offset });
+      }
+    });
+  }
+
+  draw(): void {
+    const c = this.chain();
+    if (!c) return;
+    for (let i = 0; i < c.pts.length - 1; i++) {
+      this.view.drawDimension({ id: '_d', kind: 'dimension', levelId: this.view.levelId, a: c.pts[i], b: c.pts[i + 1], offset: c.offset }, this.view.colors.select);
+    }
   }
 }

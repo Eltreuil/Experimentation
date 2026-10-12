@@ -15,7 +15,9 @@ export function viewTitle(app: App, v: ViewDef): string {
     case 'elevation':
       return `Élévation : ${{ N: 'Nord', S: 'Sud', E: 'Est', W: 'Ouest' }[v.dir]}`;
     case 'schedule':
-      return `Nomenclature : ${{ wall: 'Murs', door: 'Portes', window: 'Fenêtres', room: 'Pièces', floor: 'Sols' }[v.category]}`;
+      return `Nomenclature : ${{ wall: 'Murs', door: 'Portes', window: 'Fenêtres', room: 'Pièces', floor: 'Sols', component: 'Composants' }[v.category]}`;
+    case 'section':
+      return `Coupe : ${app.project.get<'section'>(v.sectionId)?.name ?? '?'}`;
   }
 }
 
@@ -100,8 +102,9 @@ export class ViewHost {
         break;
       }
       case '3d':
-      case 'elevation': {
-        const v3 = new View3D(this.app, this.content, v.kind === 'elevation' ? v.dir : null);
+      case 'elevation':
+      case 'section': {
+        const v3 = new View3D(this.app, this.content, v.kind === 'elevation' ? { elevation: v.dir } : v.kind === 'section' ? { sectionId: v.sectionId } : {});
         v3.setStyle(this.style3d);
         v3.setEdges(this.edges3d);
         this.current = v3;
@@ -176,7 +179,7 @@ export class ViewHost {
     if (this.view3d) return fn(this.view3d);
     const host = h('div', { style: 'position:absolute;left:-9999px;width:64px;height:64px' });
     document.body.append(host);
-    const v = new View3D(this.app, host, null);
+    const v = new View3D(this.app, host);
     try {
       v.ensureBuilt();
       return fn(v);

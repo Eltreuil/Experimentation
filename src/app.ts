@@ -12,15 +12,38 @@ export type ToolName =
   | 'room'
   | 'stair'
   | 'dimension'
-  | 'grid';
+  | 'wallDimension'
+  | 'grid'
+  | 'opening'
+  | 'shaft'
+  | 'ceiling'
+  | 'railing'
+  | 'component'
+  | 'text'
+  | 'section'
+  | 'measure'
+  | 'align'
+  | 'offset'
+  | 'trim'
+  | 'extend'
+  | 'split'
+  | 'move'
+  | 'copy'
+  | 'rotate'
+  | 'mirror'
+  | 'array';
 
-export type ScheduleCategory = 'wall' | 'door' | 'window' | 'room' | 'floor';
+/** Outils de modification qui agissent sur la sélection courante (elle est conservée). */
+export const SELECTION_TOOLS: ToolName[] = ['move', 'copy', 'rotate', 'mirror', 'array'];
+
+export type ScheduleCategory = 'wall' | 'door' | 'window' | 'room' | 'floor' | 'component';
 export type ElevationDir = 'N' | 'S' | 'E' | 'W';
 
 export type ViewDef =
   | { kind: 'plan'; levelId: Id }
   | { kind: '3d' }
   | { kind: 'elevation'; dir: ElevationDir }
+  | { kind: 'section'; sectionId: Id }
   | { kind: 'schedule'; category: ScheduleCategory };
 
 export function viewKey(v: ViewDef): string {
@@ -31,6 +54,8 @@ export function viewKey(v: ViewDef): string {
       return '3d';
     case 'elevation':
       return `elev:${v.dir}`;
+    case 'section':
+      return `section:${v.sectionId}`;
     case 'schedule':
       return `sched:${v.category}`;
   }
@@ -55,6 +80,20 @@ export interface ToolOptions {
   columnShape: 'rect' | 'round';
   stairWidth: number;
   chain: boolean;
+  openingWidth: number;
+  openingHeight: number;
+  openingSill: number;
+  shaftHeight: number;
+  ceilingHeight: number;
+  railingHeight: number;
+  componentFamily: string;
+  textSize: number;
+  offsetDistance: number;
+  offsetCopy: boolean;
+  /** Copier lors de la symétrie / copie multiple lors du déplacement. */
+  mirrorCopy: boolean;
+  multipleCopy: boolean;
+  arrayCount: number;
 }
 
 type AppEvent = 'selection' | 'view' | 'tool' | 'status' | 'options' | 'views';
@@ -70,6 +109,13 @@ export const TOOL_KINDS: Partial<Record<ToolName, ElementKind>> = {
   stair: 'stair',
   dimension: 'dimension',
   grid: 'grid',
+  opening: 'opening',
+  shaft: 'shaft',
+  ceiling: 'ceiling',
+  railing: 'railing',
+  component: 'component',
+  text: 'text',
+  section: 'section',
 };
 
 export class App {
@@ -98,7 +144,8 @@ export class App {
       }
       if (changed) this.emit('selection');
       // Le niveau d'une vue en plan a pu être supprimé.
-      const removed = (v: ViewDef) => v.kind === 'plan' && !this.project.level(v.levelId);
+      const removed = (v: ViewDef) =>
+        (v.kind === 'plan' && !this.project.level(v.levelId)) || (v.kind === 'section' && !this.project.get(v.sectionId));
       if (this.openViews.some(removed)) {
         this.openViews = this.openViews.filter((v) => !removed(v));
         this.emit('views');
@@ -126,6 +173,19 @@ export class App {
       columnShape: 'rect',
       stairWidth: 1.0,
       chain: true,
+      openingWidth: 1.0,
+      openingHeight: 2.1,
+      openingSill: 0,
+      shaftHeight: 0.5,
+      ceilingHeight: 2.5,
+      railingHeight: 1.0,
+      componentFamily: 'bed-double',
+      textSize: 2.5,
+      offsetDistance: 1.0,
+      offsetCopy: true,
+      mirrorCopy: true,
+      multipleCopy: false,
+      arrayCount: 3,
     };
   }
 
@@ -185,7 +245,7 @@ export class App {
       this.emit('view');
     }
     this.tool = t;
-    if (t !== 'select') this.clearSelection();
+    if (t !== 'select' && !SELECTION_TOOLS.includes(t)) this.clearSelection();
     this.emit('tool');
   }
 

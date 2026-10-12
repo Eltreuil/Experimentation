@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { App, ElevationDir } from '../app';
 import { elementMeshes } from '../model/mesh';
-import type { Id } from '../model/types';
+import type { Id, Section } from '../model/types';
+import { sectionLook } from './planView';
 
 export type VisualStyle = 'shaded' | 'consistent' | 'wireframe';
 
@@ -30,11 +31,26 @@ export class View3D {
   edges = true;
   clipHeight: number | null = null;
 
+  readonly elevation: ElevationDir | null;
+  /** Coupe affichée par cette vue (vue en coupe). */
+  readonly sectionId: Id | null;
+  /** Plans de coupe : horizontal (3D), avant et arrière (coupes). */
+  private sectionNear = new THREE.Plane(new THREE.Vector3(1, 0, 0), 1e6);
+  private sectionFar = new THREE.Plane(new THREE.Vector3(-1, 0, 0), 1e6);
+  private planes: THREE.Plane[];
+  private pocheMaterial: THREE.MeshBasicMaterial;
+
   constructor(
     readonly app: App,
     readonly container: HTMLElement,
-    readonly elevation: ElevationDir | null = null,
+    opts: { elevation?: ElevationDir; sectionId?: Id } = {},
   ) {
+    this.elevation = opts.elevation ?? null;
+    this.sectionId = opts.sectionId ?? null;
+    const elevation = this.elevation ?? (this.sectionId ? 'S' : null);
+    this.planes = [this.clipPlane, this.sectionNear, this.sectionFar];
+    // Poché : les faces arrière visibles à travers un plan de coupe sont remplies en sombre.
+    this.pocheMaterial = new THREE.MeshBasicMaterial({ color: 0x2f3337, side: THREE.BackSide, clippingPlanes: this.planes });
     this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     this.renderer.setPixelRatio(window.devicePixelRatio || 1);
     this.renderer.shadowMap.enabled = !elevation;
@@ -178,6 +194,8 @@ export class View3D {
 
   /** Coupe horizontale (hauteur absolue en m) pour voir l'intérieur. */
   setClip(height: number | null): void {
+    // Activer/désactiver la coupe change le poché : le modèle est reconstruit.
+    if ((height === null) !== (this.clipHeight === null)) this.dirtyModel = true;
     this.clipHeight = height;
     this.clipPlane.constant = height ?? 1000;
     this.requestRender();
@@ -187,7 +205,7 @@ export class View3D {
     const key = `${kind}:${color}:${this.style}`;
     let m = this.materials.get(key);
     if (!m) {
-      const clippingPlanes = [this.clipPlane];
+      const clippingPlanes = this.planes;
       if (kind === 'glass') {
         m = new THREE.MeshPhysicalMaterial({ color, transparent: true, opacity: 0.35, roughness: 0.05, metalness: 0, clippingPlanes, side: THREE.DoubleSide, depthWrite: false });
       } else if (this.style === 'wireframe') {
@@ -218,10 +236,36 @@ export class View3D {
     this.meshesById.clear();
   }
 
+  /** Clé de la vue pour les réglages de visibilité. */
+  get viewKey(): string {
+    if (this.sectionId) return `section:${this.sectionId}`;
+    if (this.elevation) return `elev:${this.elevation}`;
+    return '3d';
+  }
+
+  get section(): Section | undefined {
+    return this.sectionId ? this.app.project.get<'section'>(this.sectionId) : undefined;
+  }
+
+  /** Met à jour les plans avant/arrière de la coupe. */
+  private updateSectionPlanes(): void {
+    const sc = this.section;
+    if (!sc) return;
+    const look = sectionLook(sc);
+    const L = new THREE.Vector3(look.x, 0, -look.y);
+    const c = new THREE.Vector3((sc.a.x + sc.b.x) / 2, 0, -(sc.a.y + sc.b.y) / 2);
+    this.sectionNear.set(L.clone(), -c.dot(L));
+    this.sectionFar.set(L.clone().negate(), c.dot(L) + sc.depth);
+  }
+
   private rebuild(): void {
     this.clearModel();
     const p = this.app.project;
+    this.updateSectionPlanes();
+    const hidden = new Set(p.data.viewSettings?.[this.viewKey]?.hidden ?? []);
+    const cutting = !!this.sectionId || this.clipHeight !== null;
     for (const e of p.elements) {
+      if (hidden.has(e.kind)) continue;
       const em = elementMeshes(p, e);
       if (!em) continue;
       const list: THREE.Mesh[] = [];
@@ -237,6 +281,11 @@ export class View3D {
         mesh.userData.baseMaterial = mat;
         this.model.add(mesh);
         list.push(mesh);
+        if (cutting && s.material !== 'glass' && this.style !== 'wireframe') {
+          const poche = new THREE.Mesh(geo, this.pocheMaterial);
+          poche.raycast = () => {};
+          mesh.add(poche);
+        }
         if (this.edges && this.style !== 'wireframe' && s.material !== 'glass') {
           const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 20), this.edgeMaterial);
           edges.raycast = () => {};
@@ -245,26 +294,40 @@ export class View3D {
       }
       this.meshesById.set(e.id, list);
     }
-    this.edgeMaterial.clippingPlanes = [this.clipPlane];
-    if (this.elevation) this.buildLevelMarkers();
+    this.edgeMaterial.clippingPlanes = this.planes;
+    if (this.elevation || this.sectionId) this.buildLevelMarkers();
     this.updateSelection();
     this.updateShadowCamera();
   }
 
   private buildLevelMarkers(): void {
-    const box = new THREE.Box3().setFromObject(this.model);
+    const box = this.sectionBox() ?? new THREE.Box3().setFromObject(this.model);
     if (box.isEmpty()) return;
-    const horiz = this.elevation === 'N' || this.elevation === 'S' ? 'x' : 'z';
-    const min = box.min[horiz] - 2;
-    const max = box.max[horiz] + 2;
+    const right = new THREE.Vector3().crossVectors(this.viewDirection(), new THREE.Vector3(0, 1, 0)).normalize();
+    // Étendue horizontale du modèle vue depuis la caméra.
+    let min = Infinity;
+    let max = -Infinity;
+    for (const x of [box.min.x, box.max.x]) {
+      for (const z of [box.min.z, box.max.z]) {
+        const d = new THREE.Vector3(x, 0, z).dot(right);
+        min = Math.min(min, d);
+        max = Math.max(max, d);
+      }
+    }
+    const center = box.getCenter(new THREE.Vector3());
     for (const l of this.app.project.sortedLevels()) {
-      const pts =
-        horiz === 'x'
-          ? [new THREE.Vector3(min, l.elevation, 0), new THREE.Vector3(max, l.elevation, 0)]
-          : [new THREE.Vector3(0, l.elevation, min), new THREE.Vector3(0, l.elevation, max)];
-      // Place les repères devant le modèle, du côté de la caméra.
+      const base = center.clone().sub(right.clone().multiplyScalar(center.dot(right)));
+      base.y = l.elevation;
+      const pts = [base.clone().add(right.clone().multiplyScalar(min - 2)), base.clone().add(right.clone().multiplyScalar(max + 2))];
+      // Place les repères devant le modèle, du côté de la caméra (dans la zone de coupe).
       const front = this.viewDirection().multiplyScalar(-1);
-      const shift = front.clone().multiplyScalar(50);
+      const sc = this.section;
+      const shift = sc ? front.clone().multiplyScalar(-0.05) : front.clone().multiplyScalar(50);
+      if (sc) {
+        const c = new THREE.Vector3((sc.a.x + sc.b.x) / 2, 0, -(sc.a.y + sc.b.y) / 2);
+        const look = this.viewDirection();
+        pts.forEach((pt) => pt.add(look.clone().multiplyScalar(c.dot(look) - pt.dot(look) + 0.05)));
+      }
       pts.forEach((pt) => pt.add(shift));
       const geo = new THREE.BufferGeometry().setFromPoints(pts);
       const line = new THREE.Line(geo, new THREE.LineDashedMaterial({ color: 0x3e7cb1, dashSize: 0.6, gapSize: 0.25 }));
@@ -272,7 +335,6 @@ export class View3D {
       this.annotations.add(line);
       const label = makeTextSprite(`${l.name}  ${l.elevation >= 0 ? '+' : ''}${l.elevation.toFixed(2)}`);
       // Étiquette à l'extrémité droite (à l'écran) de la ligne de niveau.
-      const right = new THREE.Vector3().crossVectors(this.viewDirection(), new THREE.Vector3(0, 1, 0));
       const end = (pts[0].dot(right) > pts[1].dot(right) ? pts[0] : pts[1]).clone();
       label.position.copy(end).add(new THREE.Vector3(0, 0.35, 0));
       this.annotations.add(label);
@@ -329,7 +391,25 @@ export class View3D {
     else if (!e.shiftKey) this.app.clearSelection();
   }
 
+  /** Boîte englobante de la zone visible d'une coupe. */
+  private sectionBox(): THREE.Box3 | null {
+    const sc = this.section;
+    if (!sc) return null;
+    const model = new THREE.Box3().setFromObject(this.model);
+    const look = sectionLook(sc);
+    const pts = [sc.a, sc.b, { x: sc.a.x + look.x * sc.depth, y: sc.a.y + look.y * sc.depth }, { x: sc.b.x + look.x * sc.depth, y: sc.b.y + look.y * sc.depth }];
+    const box = new THREE.Box3();
+    for (const q of pts) box.expandByPoint(new THREE.Vector3(q.x, model.isEmpty() ? 0 : model.min.y, -q.y));
+    box.expandByPoint(new THREE.Vector3(sc.a.x, model.isEmpty() ? 6 : model.max.y, -sc.a.y));
+    return box;
+  }
+
   private viewDirection(): THREE.Vector3 {
+    const sc = this.section;
+    if (sc) {
+      const look = sectionLook(sc);
+      return new THREE.Vector3(look.x, 0, -look.y).normalize();
+    }
     // Direction dans laquelle regarde la caméra de l'élévation.
     switch (this.elevation) {
       case 'S':
@@ -346,7 +426,7 @@ export class View3D {
   }
 
   zoomExtents(): void {
-    const box = new THREE.Box3().setFromObject(this.model);
+    const box = this.sectionBox() ?? new THREE.Box3().setFromObject(this.model);
     if (box.isEmpty()) box.set(new THREE.Vector3(-5, 0, -5), new THREE.Vector3(5, 3, 5));
     const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
@@ -364,7 +444,8 @@ export class View3D {
       this.camera.up.set(0, 1, 0);
       const r = this.container.getBoundingClientRect();
       const aspect = Math.max(1, r.width) / Math.max(1, r.height);
-      const horiz = Math.abs(look.x) > 0.5 ? size.z : size.x;
+      const sc = this.section;
+      const horiz = sc ? Math.hypot(sc.b.x - sc.a.x, sc.b.y - sc.a.y) : Math.abs(look.x) > 0.5 ? size.z : size.x;
       const halfH = Math.max(size.y, horiz / aspect) * 0.65 + 0.5;
       this.camera.top = halfH;
       this.camera.bottom = -halfH;

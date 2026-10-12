@@ -21,7 +21,7 @@ import {
 } from '../model/geometry';
 import { formatLength, levelOf, type Project } from '../model/project';
 import type { Ceiling, Column, Component, Dimension, Door, Element, ElementKind, ElementOf, Floor, Grid, Id, Railing, Room, Roof, Section, Shaft, Stair, TextNote, Vec2, ViewSettings, Wall, WallOpening, Window } from '../model/types';
-import { componentFamily } from '../model/components';
+import { placer } from '../model/family';
 import type { PointerInfo, SnapKind, SnapResult, Tool } from '../tools/tool';
 import { createTool } from '../tools';
 import { RecordingContext, type VShape } from '../io/vector';
@@ -760,27 +760,23 @@ export class PlanView {
   }
 
   drawComponent(c: Component, style?: DrawStyle): void {
-    const fam = componentFamily(c.family);
-    const a = (c.rotation * Math.PI) / 180;
-    const place = (x: number, y: number): Vec2 => {
-      const lx = x * c.width;
-      const ly = y * c.depth;
-      return v(c.pos.x + lx * Math.cos(a) - ly * Math.sin(a), c.pos.y + lx * Math.sin(a) + ly * Math.cos(a));
-    };
+    const g = this.project.componentGeometry(c);
+    const place = placer(c);
     const color = style?.stroke ?? '#3d4248';
     const w = style?.width ?? 0.9;
-    for (const pr of fam.plan) {
+    const fill = style?.fill ?? 'rgba(255,255,255,0.85)';
+    for (const pr of g.prims) {
       if (pr.t === 'line') {
         this.line(place(pr.x0, pr.y0), place(pr.x1, pr.y1), color, w * 0.8);
       } else if (pr.t === 'rect') {
-        this.poly([place(pr.x0, pr.y0), place(pr.x1, pr.y0), place(pr.x1, pr.y1), place(pr.x0, pr.y1)], { stroke: color, width: w, fill: style?.fill ?? 'rgba(255,255,255,0.85)' });
+        this.poly([place(pr.x0, pr.y0), place(pr.x1, pr.y0), place(pr.x1, pr.y1), place(pr.x0, pr.y1)], { stroke: color, width: w, fill });
       } else {
         const pts: Vec2[] = [];
-        for (let i = 0; i < 28; i++) {
-          const t = (i / 28) * Math.PI * 2;
-          pts.push(place(pr.cx + pr.r * Math.cos(t), pr.cy + pr.r * Math.sin(t) * (c.width / c.depth)));
+        for (let i = 0; i < 32; i++) {
+          const t = (i / 32) * Math.PI * 2;
+          pts.push(place(pr.cx + pr.r * Math.cos(t), pr.cy + pr.r * Math.sin(t)));
         }
-        this.poly(pts, { stroke: color, width: w, fill: style?.fill ?? 'rgba(255,255,255,0.85)' });
+        this.poly(pts, { stroke: color, width: w, fill });
       }
     }
   }
@@ -1242,7 +1238,7 @@ export function elementPoints(p: Project, e: Element): Vec2[] {
     case 'railing':
       return e.points;
     case 'component':
-      return componentCorners(e);
+      return componentCorners(p, e);
     case 'text':
       return [e.pos];
     case 'section':
@@ -1250,18 +1246,10 @@ export function elementPoints(p: Project, e: Element): Vec2[] {
   }
 }
 
-export function componentCorners(c: Component): Vec2[] {
-  const a = (c.rotation * Math.PI) / 180;
-  return [
-    [-0.5, -0.5],
-    [0.5, -0.5],
-    [0.5, 0.5],
-    [-0.5, 0.5],
-  ].map(([x, y]) => {
-    const lx = x * c.width;
-    const ly = y * c.depth;
-    return v(c.pos.x + lx * Math.cos(a) - ly * Math.sin(a), c.pos.y + lx * Math.sin(a) + ly * Math.cos(a));
-  });
+export function componentCorners(p: Project, c: Component): Vec2[] {
+  const b = p.componentGeometry(c).bounds;
+  const place = placer(c);
+  return [place(b.x0, b.y0), place(b.x1, b.y0), place(b.x1, b.y1), place(b.x0, b.y1)];
 }
 
 /** Direction de visée d'une coupe (à droite de a→b, ou à gauche si inversée). */
@@ -1321,7 +1309,7 @@ export function hitElement(p: Project, e: Element, pt: Vec2, tol: number): boole
       for (let i = 0; i < e.points.length - 1; i++) if (projectOnSegment(pt, e.points[i], e.points[i + 1]).dist < tol * 1.5) return true;
       return false;
     case 'component':
-      return pointInPolygon(pt, componentCorners(e));
+      return pointInPolygon(pt, componentCorners(p, e));
     case 'text':
       return dist(pt, e.pos) < tol * 4 || (pt.x > e.pos.x && pt.x < e.pos.x + e.text.length * e.size * 0.06 && Math.abs(pt.y - e.pos.y - e.size * 0.04) < e.size * 0.07);
     case 'section':

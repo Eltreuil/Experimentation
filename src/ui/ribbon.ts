@@ -1,6 +1,6 @@
 import type { App, ToolName } from '../app';
 import { attachSelectedWalls, copySelection, detachSelectedWalls, floorFromWalls, paste, roofFromWalls } from '../commands';
-import { COMPONENT_FAMILIES } from '../model/components';
+import { familyEditor } from './familyEditor';
 import type { RoofShape } from '../model/types';
 import type { ViewHost } from '../views/viewHost';
 import { clear, h, perFrame } from './dom';
@@ -130,7 +130,7 @@ export class Ribbon {
               { label: 'Mur', icon: 'wall', tool: 'wall', shortcut: 'MU' },
               { label: 'Porte', icon: 'door', tool: 'door', shortcut: 'PO' },
               { label: 'Fenêtre', icon: 'window', tool: 'window', shortcut: 'FE' },
-              { label: 'Composant', icon: 'component', tool: 'component', shortcut: 'CP', title: 'Mobilier, sanitaires, équipements' },
+              { label: 'Composant', icon: 'component', tool: 'component', shortcut: 'CP', title: 'Familles paramétriques : mobilier, sanitaires, équipements' },
               { label: 'Poteau', icon: 'column', tool: 'column', shortcut: 'PT' },
               { label: 'Toit', icon: 'roof', tool: 'roof', shortcut: 'TO' },
               { label: 'Plafond', icon: 'ceiling', tool: 'ceiling', shortcut: 'FP', title: 'Faux-plafond' },
@@ -252,6 +252,7 @@ export class Ribbon {
             buttons: [
               { label: 'Niveaux', icon: 'level', action: () => levelsDialog(app) },
               { label: 'Types', icon: 'types', action: () => typesDialog(app) },
+              { label: 'Familles', icon: 'component', action: () => familyEditor(app), shortcut: 'FA', title: 'Éditeur de familles paramétriques' },
               { label: 'Infos projet', icon: 'info', action: () => projectInfoDialog(app), title: 'Informations du cartouche' },
             ],
           },
@@ -377,13 +378,14 @@ export class Ribbon {
         el.append(item('Hauteur', lengthField(o.railingHeight, u, (m) => app.setOptions({ railingHeight: m }), { min: 0.3 })));
         break;
       case 'component': {
-        const groups = new Map<string, { value: string; label: string }[]>();
-        for (const f of COMPONENT_FAMILIES) {
-          const list = groups.get(f.category) ?? [];
-          list.push({ value: f.id, label: `${f.category} — ${f.name}` });
-          groups.set(f.category, list);
-        }
-        el.append(item('Famille', selectField(o.componentFamily, [...groups.values()].flat(), (v) => app.setOptions({ componentFamily: v }))), hint('Espace : rotation de 90°.'));
+        const fam = p.family(o.componentFamily) ?? p.families[0];
+        const families = [...p.families].sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
+        el.append(
+          item('Famille', selectField(fam?.id ?? '', families.map((f) => ({ value: f.id, label: `${f.category} — ${f.name}` })), (v) => app.setOptions({ componentFamily: v, componentTypeId: '' }))),
+          fam ? item('Type', selectField(fam.types.find((t) => t.id === o.componentTypeId)?.id ?? fam.types[0]?.id ?? '', fam.types.map((t) => ({ value: t.id, label: t.name })), (v) => app.setOptions({ componentTypeId: v }))) : hint(''),
+          h('button', { class: 'btn small', onclick: () => familyEditor(app, fam?.id) }, 'Modifier la famille…'),
+          hint('Espace : rotation de 90°.'),
+        );
         break;
       }
       case 'column':

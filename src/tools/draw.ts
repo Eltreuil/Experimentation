@@ -16,7 +16,6 @@ import {
 import { formatLength, newId, parseLength } from '../model/project';
 import { detectRoom } from '../model/rooms';
 import type { Ceiling, Column, Component, Dimension, Door, Grid, Id, Railing, Room, Section, Shaft, Stair, TextNote, Vec2, Wall, WallOpening, Window } from '../model/types';
-import { componentFamily } from '../model/components';
 import { nextSectionName, wallChainPoints } from '../model/edit';
 import { promptDialog } from '../ui/dialogs';
 import type { PlanView } from '../views/planView';
@@ -738,8 +737,11 @@ export class ComponentTool implements Tool {
   constructor(private view: PlanView) {}
 
   private make(pos: Vec2): Component {
-    const fam = componentFamily(this.view.app.options.componentFamily);
-    return { id: newId('cp'), kind: 'component', levelId: this.view.levelId, family: fam.id, pos, rotation: this.rotation, width: fam.width, depth: fam.depth, height: fam.height };
+    const o = this.view.app.options;
+    const proj = this.view.project;
+    const fam = proj.family(o.componentFamily) ?? proj.families[0];
+    const type = fam?.types.find((t) => t.id === o.componentTypeId) ?? fam?.types[0];
+    return { id: newId('cp'), kind: 'component', levelId: this.view.levelId, family: fam?.id ?? '', typeId: type?.id, pos, rotation: this.rotation };
   }
 
   onMove(p: PointerInfo): void {

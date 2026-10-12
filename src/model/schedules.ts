@@ -1,7 +1,6 @@
 import type { ScheduleCategory } from '../app';
 import { polygonArea, polygonPerimeter, wallLength } from './geometry';
 import { meshVolume, elementMeshes } from './mesh';
-import { componentFamily } from './components';
 import { formatLength, type Project } from './project';
 import type { Id } from './types';
 
@@ -172,15 +171,19 @@ export function buildSchedule(p: Project, category: ScheduleCategory): Schedule 
       columns = [
         { key: 'category', label: 'Catégorie' },
         { key: 'family', label: 'Famille' },
+        { key: 'type', label: 'Type' },
         { key: 'level', label: 'Niveau' },
-        { key: 'size', label: 'Dimensions' },
+        { key: 'size', label: 'Encombrement' },
         { key: 'count', label: 'Nombre', align: 'right', total: (xs) => String(sum(xs)) },
       ];
-      // Regroupement par famille et niveau, comme une nomenclature Revit non détaillée.
+      // Regroupement par famille, type, niveau et encombrement (nomenclature non détaillée).
       const groups = new Map<string, { id: Id; cells: Record<string, string>; values: Record<string, number> }>();
       for (const c of p.ofKind('component')) {
-        const fam = componentFamily(c.family);
-        const key = `${fam.id}|${c.levelId}|${c.width}|${c.depth}`;
+        const fam = p.family(c.family);
+        const type = fam?.types.find((t) => t.id === c.typeId) ?? fam?.types[0];
+        const b = p.componentGeometry(c).bounds;
+        const size = `${formatLength(b.x1 - b.x0, u)} × ${formatLength(b.y1 - b.y0, u)} ${u}`;
+        const key = `${c.family}|${type?.id}|${c.levelId}|${size}`;
         const g = groups.get(key);
         if (g) {
           g.values.count++;
@@ -189,17 +192,11 @@ export function buildSchedule(p: Project, category: ScheduleCategory): Schedule 
         }
         groups.set(key, {
           id: c.id,
-          cells: {
-            category: fam.category,
-            family: fam.name,
-            level: lvlName(c.levelId),
-            size: `${formatLength(c.width, u)} × ${formatLength(c.depth, u)} ${u}`,
-            count: '1',
-          },
+          cells: { category: fam?.category ?? '?', family: fam?.name ?? `Famille manquante (${c.family})`, type: type?.name ?? '', level: lvlName(c.levelId), size, count: '1' },
           values: { count: 1 },
         });
       }
-      rows = [...groups.values()].sort((a, b) => a.cells.category.localeCompare(b.cells.category) || a.cells.family.localeCompare(b.cells.family));
+      rows = [...groups.values()].sort((a, b) => a.cells.category.localeCompare(b.cells.category) || a.cells.family.localeCompare(b.cells.family) || a.cells.type.localeCompare(b.cells.type));
       break;
     }
   }

@@ -123,16 +123,95 @@ export interface Railing extends BaseElement {
   baseOffset: number;
 }
 
-/** Composant posé (mobilier, sanitaire, équipement) issu de la bibliothèque. */
+/** Occurrence d'une famille paramétrique (mobilier, sanitaire, équipement…). */
 export interface Component extends BaseElement {
   kind: 'component';
   levelId: Id;
+  /** Identifiant de la famille chargée dans le projet. */
   family: string;
+  /** Type de la famille (jeu de valeurs des paramètres de type). */
+  typeId?: Id;
   pos: Vec2;
   rotation: number;
-  width: number;
-  depth: number;
-  height: number;
+  /** Décalage vertical par rapport au niveau. */
+  offset?: number;
+  /** Valeurs des paramètres d'occurrence (écrasent les valeurs par défaut). */
+  params?: Record<string, ParamValue>;
+}
+
+// ---------------------------------------------------------------------------
+// Familles paramétriques
+
+export type ParamValue = number | boolean | string;
+export type ParamKind = 'length' | 'number' | 'integer' | 'angle' | 'boolean' | 'text' | 'material';
+
+export interface FamilyParam {
+  name: string;
+  kind: ParamKind;
+  /** Paramètre de type (partagé par toutes les occurrences du type) ou d'occurrence. */
+  scope: 'type' | 'instance';
+  /** Valeur par défaut. */
+  value: ParamValue;
+  /** Formule : si présente, la valeur est calculée (paramètre piloté). */
+  formula?: string;
+}
+
+export interface FamilyType {
+  id: Id;
+  name: string;
+  values: Record<string, ParamValue>;
+}
+
+/** Expression : nombre (mètres) ou formule faisant référence aux paramètres. */
+export type Expr = number | string;
+
+export interface FamilySolid {
+  id: Id;
+  name?: string;
+  shape: 'box' | 'cylinder';
+  x0: Expr;
+  x1: Expr;
+  y0: Expr;
+  y1: Expr;
+  z0: Expr;
+  z1: Expr;
+  /** Couleur « #rrggbb » ou nom d'un paramètre Matériau. */
+  material: string;
+  /** Visibilité conditionnelle (formule booléenne). */
+  visible?: Expr;
+  /** Répétition : nombre d'exemplaires et pas ; la variable « i » vaut 0, 1, 2… */
+  count?: Expr;
+  dx?: Expr;
+  dy?: Expr;
+  dz?: Expr;
+  glass?: boolean;
+}
+
+export interface FamilySymbol {
+  id: Id;
+  shape: 'line' | 'rect' | 'circle';
+  /** Ligne : x0,y0 → x1,y1. Rectangle : coins opposés. Cercle : centre (x0,y0) et rayon x1. */
+  x0: Expr;
+  y0: Expr;
+  x1: Expr;
+  y1: Expr;
+  visible?: Expr;
+  count?: Expr;
+  dx?: Expr;
+  dy?: Expr;
+}
+
+export interface FamilyDef {
+  id: Id;
+  name: string;
+  category: string;
+  description?: string;
+  params: FamilyParam[];
+  types: FamilyType[];
+  solids: FamilySolid[];
+  symbols: FamilySymbol[];
+  /** Symbole en plan déduit des volumes (vue de dessus) en plus des symboles 2D. */
+  autoSymbol: boolean;
 }
 
 export interface TextNote extends BaseElement {
@@ -257,6 +336,8 @@ export interface ProjectData {
   wallTypes: WallType[];
   doorTypes: DoorType[];
   windowTypes: WindowType[];
+  /** Familles paramétriques chargées dans le projet. */
+  families?: FamilyDef[];
   elements: Record<Id, Element>;
   /** Réglages d'affichage par vue (clé de vue). */
   viewSettings?: Record<string, ViewSettings>;

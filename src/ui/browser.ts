@@ -3,6 +3,7 @@ import { addLevel } from '../commands';
 import { formatLength } from '../model/project';
 import { clear, h, perFrame } from './dom';
 import { ICONS } from './icons';
+import { familyEditor } from './familyEditor';
 
 /** Arborescence du projet : vues, nomenclatures, niveaux et types. */
 export class ProjectBrowser {
@@ -111,6 +112,27 @@ export class ProjectBrowser {
         ...this.typeList('Murs', p.data.wallTypes, this.app.options.wallTypeId, (id) => this.app.setOptions({ wallTypeId: id })),
         ...this.typeList('Portes', p.data.doorTypes, this.app.options.doorTypeId, (id) => this.app.setOptions({ doorTypeId: id })),
         ...this.typeList('Fenêtres', p.data.windowTypes, this.app.options.windowTypeId, (id) => this.app.setOptions({ windowTypeId: id })),
+        h('div', { class: 'tree-sub' }, 'Familles paramétriques'),
+        ...[...p.families]
+          .sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name))
+          .map((f) =>
+            h(
+              'div',
+              {
+                class: `tree-item type${f.id === this.app.options.componentFamily ? ' current' : ''}`,
+                title: 'Clic : placer — double-clic : modifier la famille',
+                onclick: () => {
+                  this.app.setOptions({ componentFamily: f.id, componentTypeId: '' });
+                  this.app.setTool('component');
+                },
+                ondblclick: () => familyEditor(this.app, f.id),
+              },
+              h('span', { class: 'tree-dot' }),
+              h('span', { class: 'tree-label' }, f.name),
+              h('span', { class: 'tree-meta' }, f.category),
+            ),
+          ),
+        h('button', { class: 'btn small block', onclick: () => familyEditor(this.app) }, 'Éditeur de familles…'),
       ]),
     );
   }

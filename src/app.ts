@@ -87,6 +87,7 @@ export interface ToolOptions {
   ceilingHeight: number;
   railingHeight: number;
   componentFamily: string;
+  componentTypeId: string;
   textSize: number;
   offsetDistance: number;
   offsetCopy: boolean;
@@ -179,7 +180,8 @@ export class App {
       shaftHeight: 0.5,
       ceilingHeight: 2.5,
       railingHeight: 1.0,
-      componentFamily: 'bed-double',
+      componentFamily: 'param-table',
+      componentTypeId: '',
       textSize: 2.5,
       offsetDistance: 1.0,
       offsetCopy: true,

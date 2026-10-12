@@ -1,7 +1,7 @@
 // Génération de la géométrie 3D (indépendante du moteur de rendu) : chaque
 // élément produit des solides triangulés, réutilisés par la vue 3D et l'export.
 import { ShapeUtils, Vector2 } from 'three';
-import { componentFamily } from './components';
+import { placer } from './family';
 import {
   add,
   mul,
@@ -207,75 +207,23 @@ export function elementMeshes(p: Project, e: Element): ElementMesh | null {
       solids.push(...railing(e.points, lvlElev(e.levelId) + e.baseOffset, e.height));
       break;
     case 'component': {
-      const fam = componentFamily(e.family);
-      const base = lvlElev(e.levelId);
-      const a = (e.rotation * Math.PI) / 180;
-      const place = (x: number, y: number): Vec2 => {
-        const lx = x * e.width;
-        const ly = y * e.depth;
-        return { x: e.pos.x + lx * Math.cos(a) - ly * Math.sin(a), y: e.pos.y + lx * Math.sin(a) + ly * Math.cos(a) };
-      };
-      for (const b of fam.boxes) {
+      const g = p.componentGeometry(e);
+      const base = lvlElev(e.levelId) + (e.offset ?? 0);
+      const place = placer(e);
+      for (const b of g.boxes) {
         let pts: Vec2[];
-        if (b.round) {
+        if (b.shape === 'cylinder') {
           const cx = (b.x0 + b.x1) / 2;
           const cy = (b.y0 + b.y1) / 2;
           pts = [];
-          for (let i = 0; i < 20; i++) {
-            const t = (i / 20) * Math.PI * 2;
+          for (let i = 0; i < 24; i++) {
+            const t = (i / 24) * Math.PI * 2;
             pts.push(place(cx + (Math.cos(t) * (b.x1 - b.x0)) / 2, cy + (Math.sin(t) * (b.y1 - b.y0)) / 2));
           }
         } else {
           pts = [place(b.x0, b.y0), place(b.x1, b.y0), place(b.x1, b.y1), place(b.x0, b.y1)];
         }
-        solids.push({ positions: prism(pts, base + b.z0 * e.height, base + b.z1 * e.height), color: b.color, material: b.color === '#cfe6f5' ? 'glass' : 'opaque' });
-      }
-      break;
-    }
-    case 'door':
-    case 'window': {
-      const fr = p.openingFrame(e);
-      if (!fr) return null;
-      const wall = fr.wall;
-      const t = p.thickness(wall);
-      const base = lvlElev(wall.levelId) + wall.baseOffset;
-      const frame = 0.05;
-      if (e.kind === 'door') {
-        const dt = p.doorType(e.typeId);
-        const z1 = base + dt.height;
-        // Huisserie (montants + traverse) et vantail.
-        const dir = fr.dir;
-        const jL = add(fr.center, mul(dir, -dt.width / 2 + frame / 2));
-        const jR = add(fr.center, mul(dir, dt.width / 2 - frame / 2));
-        const frameColor = '#e8e4dc';
-        solids.push({ positions: orientedBox(jL, dir, frame, t + 0.01, base, z1), color: frameColor, material: 'opaque' });
-        solids.push({ positions: orientedBox(jR, dir, frame, t + 0.01, base, z1), color: frameColor, material: 'opaque' });
-        solids.push({ positions: orientedBox(fr.center, dir, dt.width, t + 0.01, z1 - frame, z1), color: frameColor, material: 'opaque' });
-        const side = e.flipFacing ? 1 : -1;
-        const leafPos = add(fr.center, mul(perp(dir), (side * t) / 2 - side * 0.03));
-        solids.push({ positions: orientedBox(leafPos, dir, dt.width - frame * 2, 0.04, base, z1 - frame), color: dt.color, material: 'opaque' });
-      } else {
-        const wt = p.windowType(e.typeId);
-        const z0 = base + e.sill;
-        const z1 = z0 + wt.height;
-        const dir = fr.dir;
-        const fw = 0.06;
-        const depth = 0.08;
-        const c = fr.center;
-        const parts: [Vec2, number, number, number][] = [
-          [add(c, mul(dir, -wt.width / 2 + fw / 2)), fw, z0, z1],
-          [add(c, mul(dir, wt.width / 2 - fw / 2)), fw, z0, z1],
-        ];
-        for (const [pos, w, a, b] of parts) solids.push({ positions: orientedBox(pos, dir, w, depth, a, b), color: wt.color, material: 'opaque' });
-        solids.push({ positions: orientedBox(c, dir, wt.width, depth, z0, z0 + fw), color: wt.color, material: 'opaque' });
-        solids.push({ positions: orientedBox(c, dir, wt.width, depth, z1 - fw, z1), color: wt.color, material: 'opaque' });
-        if (wt.width > 1.0) solids.push({ positions: orientedBox(c, dir, fw, depth, z0, z1), color: wt.color, material: 'opaque' });
-        // Appui de fenêtre
-        if (e.sill > 0.05) {
-          const sillPos = add(c, mul(perp(dir), 0));
-          solids.push({ positions: orientedBox(sillPos, dir, wt.width + 0.06, t + 0.06, z0 - 0.03, z0), color: '#cfcac0', material: 'opaque' });
-        }
-        solids.push({ positions: orientedBox(c, dir, wt.width - fw, 0.012, z0 + fw, z1 - fw), color: '#9cc9e8', material: 'glass' });
+        solids.push({ positions: prism(pts, base + b.z0, base + b.z1), color: b.color, material: b.glass ? 'glass' : 'opaque' });
       }
       break;
     }

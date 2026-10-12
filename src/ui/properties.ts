@@ -2,7 +2,7 @@ import type { App } from '../app';
 import { flipSelectedDoors } from '../commands';
 import { polygonArea, polygonPerimeter, stairRisers, wallLength, add, mul, wallDir, dist } from '../model/geometry';
 import { formatLength, levelOf } from '../model/project';
-import { COMPONENT_FAMILIES, componentFamily } from '../model/components';
+import { familyEditor, formatParam, paramField } from './familyEditor';
 import { KIND_LABELS, type Element, type ElementKind, type Id } from '../model/types';
 import { clear, h, perFrame } from './dom';
 import { ROOF_SHAPES } from './ribbon';
@@ -367,28 +367,51 @@ export class PropertiesPanel {
         break;
       }
       case 'component': {
-        const fam = componentFamily(e.family);
-        this.header(root, 'Composant', fam.name);
+        const fam = p.family(e.family);
+        const type = fam?.types.find((t) => t.id === e.typeId) ?? fam?.types[0];
+        const g = p.componentGeometry(e);
+        this.header(root, fam?.name ?? 'Famille manquante', type?.name);
         root.append(
           h('div', { class: 'type-selector' },
-            selectField(e.family, COMPONENT_FAMILIES.map((f) => ({ value: f.id, label: `${f.category} — ${f.name}` })), (val) =>
+            selectField(e.family, p.families.map((f) => ({ value: f.id, label: `${f.category} — ${f.name}` })), (val) =>
               this.edit('Changer de famille', () => {
-                const nf = componentFamily(val);
-                e.family = nf.id;
-                e.width = nf.width;
-                e.depth = nf.depth;
-                e.height = nf.height;
+                e.family = val;
+                e.typeId = p.family(val)?.types[0]?.id;
+                e.params = undefined;
               }),
             ),
+            fam ? selectField(type?.id ?? '', fam.types.map((t) => ({ value: t.id, label: t.name })), (val) => this.edit('Changer de type', () => (e.typeId = val))) : null,
+            h('button', { class: 'btn small block', onclick: () => familyEditor(this.app, e.family) }, 'Modifier la famille…'),
           ),
         );
         const c = this.section(root, 'Contraintes');
         c.append(row('Niveau', levelSelect(e.levelId, (id) => (e.levelId = id))));
+        c.append(row('Décalage', L(e.offset ?? 0, (m) => (e.offset = m))));
         c.append(row('Rotation', numberField(e.rotation, (val) => this.edit('Rotation', () => (e.rotation = val)), { step: 15, suffix: '°' })));
-        const d = this.section(root, 'Cotes');
-        d.append(row('Largeur', L(e.width, (m) => (e.width = m), 0.05)));
-        d.append(row('Profondeur', L(e.depth, (m) => (e.depth = m), 0.05)));
-        d.append(row('Hauteur', L(e.height, (m) => (e.height = m), 0.05)));
+        if (fam) {
+          const inst = fam.params.filter((q) => q.scope === 'instance' && !q.formula);
+          if (inst.length) {
+            const s = this.section(root, 'Paramètres d’occurrence');
+            for (const q of inst) {
+              s.append(row(q.name, paramField(q.kind, e.params?.[q.name] ?? g.values[q.name] ?? q.value, u, (v) => this.edit(q.name, () => (e.params = { ...(e.params ?? {}), [q.name]: v })))));
+            }
+          }
+          const typeParams = fam.params.filter((q) => q.scope === 'type' && !q.formula);
+          if (typeParams.length && type) {
+            const s = this.section(root, `Paramètres de type — ${type.name} (toutes les occurrences)`);
+            for (const q of typeParams) {
+              s.append(row(q.name, paramField(q.kind, type.values[q.name] ?? q.value, u, (v) => this.edit(q.name, () => (type.values[q.name] = v)))));
+            }
+          }
+          const computed = fam.params.filter((q) => q.formula);
+          if (computed.length) {
+            const s = this.section(root, 'Valeurs calculées (formules)');
+            for (const q of computed) s.append(row(q.name, readonlyField(formatParam(q.kind, g.values[q.name], u)), q.formula));
+          }
+        }
+        const b = g.bounds;
+        this.section(root, 'Encombrement').append(row('Dimensions', readonlyField(`${formatLength(b.x1 - b.x0, u)} × ${formatLength(b.y1 - b.y0, u)} ${u}`)));
+        if (g.errors.length) root.append(h('div', { class: 'fe-errors' }, ...g.errors.slice(0, 4).map((x) => h('div', {}, `⚠ ${x}`))));
         common(this.section(root, 'Données d’identification'));
         break;
       }

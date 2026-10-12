@@ -9,6 +9,7 @@ import { ProjectBrowser } from './ui/browser';
 import { confirmDialog, visibilityDialog } from './ui/dialogs';
 import { h } from './ui/dom';
 import { PropertiesPanel } from './ui/properties';
+import { familyEditor } from './ui/familyEditor';
 import { Ribbon, type FileActions } from './ui/ribbon';
 import { ViewHost, viewTitle } from './views/viewHost';
 import { printSVG, shapesToDXF, sheetSVG } from './io/vector';
@@ -213,6 +214,7 @@ const SHORTCUTS: Record<string, ToolName | (() => void)> = {
   ZE: () => host.zoomExtents(),
   VG: () => visibilityDialog(app),
   AH: () => attachSelectedWalls(app),
+  FA: () => familyEditor(app),
 };
 let keyBuffer = '';
 let keyTimer = 0;

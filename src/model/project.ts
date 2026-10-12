@@ -1,5 +1,9 @@
 import { wallDir, wallLength, wallOutline, wallTypeThickness, add, mul, type OpeningSpan, type WallOutline } from './geometry';
+import { evaluateFamily, type FamilyResult } from './family';
+import { defaultFamilies } from './familyLibrary';
 import type {
+  Component,
+  FamilyDef,
   Hosted,
   DoorType,
   Element,
@@ -38,6 +42,7 @@ export class Project {
   private redoStack: HistoryEntry[] = [];
   private listeners = new Set<() => void>();
   private outlineCache: Map<Id, WallOutline> | null = null;
+  private familyCache = new Map<string, FamilyResult>();
   dirty = false;
 
   constructor(data: ProjectData) {
@@ -51,6 +56,7 @@ export class Project {
 
   emit(): void {
     this.outlineCache = null;
+    this.familyCache.clear();
     for (const fn of this.listeners) fn();
   }
 
@@ -180,6 +186,32 @@ export class Project {
   }
   windowType(id: Id): WindowType {
     return this.data.windowTypes.find((t) => t.id === id) ?? this.data.windowTypes[0];
+  }
+
+  get families(): FamilyDef[] {
+    return this.data.families ?? (this.data.families = []);
+  }
+
+  family(id: Id): FamilyDef | undefined {
+    return this.families.find((f) => f.id === id);
+  }
+
+  /** Géométrie évaluée d'une occurrence de famille (mise en cache jusqu'à la prochaine modification). */
+  componentGeometry(c: Component): FamilyResult {
+    const fam = this.family(c.family);
+    if (!fam) return MISSING_FAMILY;
+    const key = `${c.family}|${c.typeId ?? ''}|${c.params ? JSON.stringify(c.params) : ''}`;
+    let r = this.familyCache.get(key);
+    if (!r) {
+      r = evaluateFamily(fam, c.typeId, c.params);
+      this.familyCache.set(key, r);
+    }
+    return r;
+  }
+
+  /** Nombre d'occurrences d'une famille (ou d'un de ses types). */
+  familyUsage(familyId: Id, typeId?: Id): number {
+    return this.ofKind('component').filter((c) => c.family === familyId && (typeId === undefined || (c.typeId ?? this.family(familyId)?.types[0]?.id) === typeId)).length;
   }
 
   thickness(w: Wall): number {
@@ -313,6 +345,26 @@ export class Project {
   }
 }
 
+const MISSING_FAMILY: FamilyResult = {
+  values: {},
+  boxes: [{ shape: 'box', x0: -0.25, x1: 0.25, y0: -0.25, y1: 0.25, z0: 0, z1: 0.5, color: '#d93025', glass: false }],
+  prims: [{ t: 'rect', x0: -0.25, y0: -0.25, x1: 0.25, y1: 0.25 }, { t: 'line', x0: -0.25, y0: -0.25, x1: 0.25, y1: 0.25 }],
+  bounds: { x0: -0.25, y0: -0.25, x1: 0.25, y1: 0.25 },
+  errors: ['Famille introuvable'],
+};
+
+/** Mise à niveau des anciens fichiers (composants à dimensions fixes). */
+function migrateElements(els: Record<Id, Element>): Record<Id, Element> {
+  for (const e of Object.values(els)) {
+    if (e.kind !== 'component') continue;
+    const legacy = e as Component & { width?: number; depth?: number; height?: number };
+    delete legacy.width;
+    delete legacy.depth;
+    delete legacy.height;
+  }
+  return els;
+}
+
 export function isHosted(e: Element): e is Hosted {
   return e.kind === 'door' || e.kind === 'window' || e.kind === 'opening';
 }
@@ -337,7 +389,8 @@ export function normalize(data: ProjectData): ProjectData {
     wallTypes: data.wallTypes ?? [],
     doorTypes: data.doorTypes ?? [],
     windowTypes: data.windowTypes ?? [],
-    elements: data.elements ?? {},
+    elements: migrateElements(data.elements ?? {}),
+    families: data.families ?? defaultFamilies(),
     viewSettings: data.viewSettings ?? {},
     info: data.info ?? {},
   };

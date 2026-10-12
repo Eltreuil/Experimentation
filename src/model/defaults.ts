@@ -1,4 +1,5 @@
 import { newId } from './project';
+import { defaultFamilies } from './familyLibrary';
 import type { Element, ProjectData, Vec2, Wall } from './types';
 
 export function emptyProject(name = 'Nouveau projet'): ProjectData {
@@ -26,6 +27,7 @@ export function emptyProject(name = 'Nouveau projet'): ProjectData {
       { id: 'wn-120', name: 'Fenêtre 120 x 135', width: 1.2, height: 1.35, sill: 0.9, color: '#ffffff' },
       { id: 'wn-240', name: 'Baie coulissante 240 x 215', width: 2.4, height: 2.15, sill: 0, color: '#3c3c3c' },
     ],
+    families: defaultFamilies(),
     elements: {},
   };
 }
@@ -192,17 +194,18 @@ export function sampleProject(): ProjectData {
   });
 
   // --- Mobilier et équipements
-  const comp = (family: string, x: number, y: number, rotation: number, levelId: string, w: number, d: number, h: number) =>
-    push({ id: newId('cp'), kind: 'component', levelId, family, pos: { x, y }, rotation, width: w, depth: d, height: h });
-  comp('sofa', 2.2, 1.0, 0, 'lvl-0', 2.2, 0.9, 0.85);
-  comp('table-dining', 2.2, 5.6, 0, 'lvl-0', 1.8, 0.9, 0.75);
-  comp('kitchen-run', 8.05, 7.5, 180, 'lvl-0', 2.4, 0.65, 0.9);
-  comp('fridge', 9.5, 5.3, 270, 'lvl-0', 0.6, 0.65, 1.85);
-  comp('bed-double', 2.5, 6.8, 180, 'lvl-1', 1.6, 2.1, 0.9);
-  comp('wardrobe', 4.5, 5.6, 270, 'lvl-1', 1.2, 0.6, 2.2);
-  comp('bed-single', 1.0, 2.0, 270, 'lvl-1', 0.9, 2.0, 0.9);
-  comp('desk', 3.5, 0.6, 0, 'lvl-1', 1.4, 0.7, 0.75);
-  comp('tree', -4, 4, 0, 'lvl-0', 4, 4, 6);
+  const comp = (family: string, x: number, y: number, rotation: number, levelId: string, typeId?: string, params?: Record<string, number | boolean>) =>
+    push({ id: newId('cp'), kind: 'component', levelId, family, typeId, pos: { x, y }, rotation, params });
+  comp('sofa', 2.2, 1.0, 0, 'lvl-0');
+  comp('param-table', 2.2, 5.6, 0, 'lvl-0', 't1');
+  comp('param-kitchen', 7.95, 7.5, 180, 'lvl-0', 't1', { Longueur: 3.6 });
+  comp('fridge', 9.5, 5.3, 270, 'lvl-0');
+  comp('param-bed', 2.5, 6.75, 0, 'lvl-1', 't1');
+  comp('wardrobe', 4.5, 5.6, 270, 'lvl-1');
+  comp('param-bed', 1.1, 2.0, 90, 'lvl-1', 't3', { 'Avec chevets': false });
+  comp('desk', 3.5, 0.6, 0, 'lvl-1');
+  comp('param-shelf', 4.65, 2.2, 90, 'lvl-1', 't1');
+  comp('tree', -4, 4, 0, 'lvl-0');
 
   // --- Garde-corps de la trémie d'escalier à l'étage
   push({ id: newId('gc'), kind: 'railing', levelId: 'lvl-1', points: [{ x: 8.8, y: 4.4 }, { x: 8.8, y: 0.2 }], height: 1.0, baseOffset: 0 });

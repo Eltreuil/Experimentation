@@ -2,7 +2,6 @@
 // fenêtres, dalles, toitures, poteaux, escaliers et espaces.
 import { polygonArea, wallDir } from '../model/geometry';
 import type { Project } from '../model/project';
-import { componentFamily } from '../model/components';
 import { elementMeshes, floorHoles } from '../model/mesh';
 import { isHosted } from '../model/project';
 import type { Element, Id, RoofShape, Vec2 } from '../model/types';
@@ -305,12 +304,13 @@ export function exportIFC(p: Project, opts: IfcOptions = {}): string {
       case 'component': {
         const st = storeyOf.get(e.levelId);
         if (!st) return;
-        const fam = componentFamily(e.family);
+        const def = p.family(e.family);
+        const fam = { id: e.family, name: def?.name ?? 'Composant', category: def?.category ?? 'Modèle générique' };
         const rep = brepOf(e, st.elevation);
         const pl = localPl(e.levelId);
         const r = rep ? ref(rep) : '$';
         const sanitary: Record<string, string> = { wc: 'TOILETPAN', sink: 'WASHHANDBASIN', bathtub: 'BATH', shower: 'SHOWER' };
-        const furniture: Record<string, string> = { 'bed-double': 'BED', 'bed-single': 'BED', sofa: 'SOFA', armchair: 'CHAIR', 'table-dining': 'TABLE', 'table-round': 'TABLE', desk: 'DESK', wardrobe: 'SHELF' };
+        const furniture: Record<string, string> = { 'param-bed': 'BED', 'param-table': 'TABLE', 'param-shelf': 'SHELF', 'bed-double': 'BED', 'bed-single': 'BED', sofa: 'SOFA', armchair: 'CHAIR', 'table-dining': 'TABLE', 'table-round': 'TABLE', desk: 'DESK', wardrobe: 'SHELF' };
         let id: number;
         if (sanitary[fam.id]) id = w.add(`IFCSANITARYTERMINAL('${guid()}',$,${str(fam.name)},$,$,${ref(pl)},${r},${str(e.mark)},.${sanitary[fam.id]}.)`);
         else if (fam.category === 'Mobilier' || fam.category === 'Cuisine') id = w.add(`IFCFURNITURE('${guid()}',$,${str(fam.name)},$,$,${ref(pl)},${r},${str(e.mark)},.${furniture[fam.id] ?? 'NOTDEFINED'}.)`);

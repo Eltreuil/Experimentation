@@ -120,6 +120,9 @@ export function duplicate(p: Project, ids: Iterable<Id>, f: Transform, opts: { m
     e.id = newId(e.kind.slice(0, 2));
     idMap.set(src.id, e.id);
     if (opts.levelId && 'levelId' in e) e.levelId = opts.levelId;
+    // Une copie appartient à la phase courante et n'est pas démolie.
+    if (p.activePhase) e.phaseCreated = p.activePhase;
+    e.phaseDemolished = null;
     transformElement(e, f, opts.mirror);
     if (e.kind === 'wall') e.attachRoofId = e.attachRoofId ?? null;
     renumber(p, e);
@@ -133,6 +136,8 @@ export function duplicate(p: Project, ids: Iterable<Id>, f: Transform, opts: { m
     const e = structuredClone(src);
     e.id = newId(e.kind.slice(0, 2));
     e.hostId = host;
+    if (p.activePhase) e.phaseCreated = p.activePhase;
+    e.phaseDemolished = null;
     renumber(p, e);
     p.add(e);
     created.push(e.id);
@@ -196,7 +201,7 @@ export function moveElements(p: Project, ids: Iterable<Id>, delta: Vec2, stretch
   const tees = stretch ? tJoinedEnds(p, set) : [];
   for (const id of set) {
     const e = p.get(id);
-    if (!e) continue;
+    if (!e || e.pinned) continue;
     if (isHosted(e)) {
       if (set.has(e.hostId)) continue;
       const w = p.get<'wall'>(e.hostId);
@@ -220,7 +225,7 @@ export function rotateElements(p: Project, ids: Iterable<Id>, center: Vec2, degr
   const a = (degrees * Math.PI) / 180;
   for (const id of ids) {
     const e = p.get(id);
-    if (!e) continue;
+    if (!e || e.pinned) continue;
     transformElement(e, (q) => rotate(q, a, center));
     if (e.kind === 'column' || e.kind === 'component' || e.kind === 'text') e.rotation = normDeg(e.rotation + degrees);
   }
@@ -239,7 +244,7 @@ export function mirrorElements(p: Project, ids: Iterable<Id>, a: Vec2, b: Vec2):
   const list = [...ids];
   for (const id of list) {
     const e = p.get(id);
-    if (!e) continue;
+    if (!e || e.pinned) continue;
     transformElement(e, (q) => reflectPoint(q, a, b), true);
     if (e.kind === 'column' || e.kind === 'component') e.rotation = normDeg(2 * axisDeg - e.rotation + 180);
   }
@@ -422,6 +427,25 @@ export function attachWallsToRoof(p: Project, wallIds: Iterable<Id>): number {
       w.attachRoofId = best.id;
       n++;
     }
+  }
+  return n;
+}
+
+/**
+ * Démolir : marque les éléments (et leurs éléments hébergés) comme démolis
+ * dans la phase donnée. Un élément créé dans cette même phase ne peut pas être
+ * démoli (il faut le supprimer). Retourne le nombre d'éléments démolis.
+ */
+export function demolish(p: Project, ids: Iterable<Id>, phaseId: Id): number {
+  const target = p.phases.findIndex((ph) => ph.id === phaseId);
+  let n = 0;
+  for (const id of withHosted(p, ids)) {
+    const e = p.get(id);
+    if (!e) continue;
+    const created = Math.max(0, p.phases.findIndex((ph) => ph.id === (e.phaseCreated ?? p.phases[0].id)));
+    if (created >= target) continue;
+    e.phaseDemolished = phaseId;
+    n++;
   }
   return n;
 }

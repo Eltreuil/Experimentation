@@ -123,6 +123,10 @@ export class SelectTool implements Tool {
       return;
     }
     const grip = this.gripAt(p.raw);
+    if (grip && this.project.get(grip.id)?.pinned) {
+      this.app.status('Élément épinglé : désépinglez-le pour le modifier.');
+      return;
+    }
     if (grip) {
       const original = structuredClone(this.project.get(grip.id)!);
       const linked =
@@ -143,7 +147,11 @@ export class SelectTool implements Tool {
       const originals = new Map<Id, Element>();
       for (const id of this.app.selection) {
         const e = this.project.get(id);
-        if (e) originals.set(id, structuredClone(e));
+        if (e && !e.pinned) originals.set(id, structuredClone(e));
+      }
+      if (!originals.size) {
+        this.app.status('Élément épinglé : désépinglez-le (PN/UP ou Propriétés) pour le déplacer.');
+        return;
       }
       const movedWallPts: Vec2[] = [];
       for (const e of originals.values()) if (e.kind === 'wall') movedWallPts.push(e.a, e.b);

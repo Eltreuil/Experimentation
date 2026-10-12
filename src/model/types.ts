@@ -65,7 +65,26 @@ interface BaseElement {
   id: Id;
   mark?: string;
   comments?: string;
+  /** Phase de création (par défaut : première phase du projet). */
+  phaseCreated?: Id;
+  /** Phase de démolition (absente : l'élément n'est pas démoli). */
+  phaseDemolished?: Id | null;
+  /** Épinglé : ne peut être ni déplacé ni supprimé. */
+  pinned?: boolean;
 }
+
+export interface Phase {
+  id: Id;
+  name: string;
+}
+
+/**
+ * Filtre de phase d'une vue (équivalents Revit) :
+ * complete = afficher complet, all = afficher tout (existant / démoli / neuf
+ * différenciés), proposed = état projeté (précédent + nouveau), demolition =
+ * précédent + démolition, existing = état existant, new = nouveau seulement.
+ */
+export type PhaseFilter = 'complete' | 'all' | 'proposed' | 'demolition' | 'existing' | 'new';
 
 export interface Wall extends BaseElement {
   kind: 'wall';
@@ -358,6 +377,8 @@ export interface ProjectData {
   windowTypes: WindowType[];
   /** Familles paramétriques chargées dans le projet. */
   families?: FamilyDef[];
+  /** Phases du projet, dans l'ordre chronologique. */
+  phases?: Phase[];
   elements: Record<Id, Element>;
   /** Réglages d'affichage par vue (clé de vue). */
   viewSettings?: Record<string, ViewSettings>;
@@ -372,6 +393,9 @@ export interface ViewSettings {
   scale?: number;
   /** Affiche le niveau inférieur en grisé (plans). */
   underlay?: boolean;
+  /** Phase de la vue et filtre de phase. */
+  phase?: Id;
+  phaseFilter?: PhaseFilter;
 }
 
 export interface ProjectInfo {

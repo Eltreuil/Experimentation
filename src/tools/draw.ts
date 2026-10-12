@@ -497,14 +497,14 @@ export class RoomTool implements Tool {
     this.lastProbe = now;
     const proj = this.view.project;
     const existing = this.existing(p.raw);
-    this.hover = existing ? null : detectRoom(proj, this.view.levelId, p.raw);
+    this.hover = existing ? null : detectRoom(proj, this.view.levelId, p.raw, proj.activePhase ?? undefined);
     this.view.app.status(existing ? 'Un élément existe déjà ici.' : this.hover ? 'Cliquez pour créer l’élément.' : 'Espace non fermé.');
   }
 
   onDown(p: PointerInfo): void {
     if (!this.auto) return this.sketch.onDown(p);
     if (this.existing(p.raw)) return;
-    const pts = detectRoom(this.view.project, this.view.levelId, p.raw);
+    const pts = detectRoom(this.view.project, this.view.levelId, p.raw, this.view.project.activePhase ?? undefined);
     if (!pts) {
       this.view.app.status('Impossible : l’espace n’est pas fermé par des murs.');
       return;

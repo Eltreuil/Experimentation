@@ -26,6 +26,7 @@ import { placer } from '../model/family';
 import type { PointerInfo, SnapKind, SnapResult, Tool } from '../tools/tool';
 import { createTool } from '../tools';
 import { RecordingContext, type VShape } from '../io/vector';
+import { PHASE_COLORS, elementDisplay } from '../model/phases';
 
 /** Hauteur du plan de coupe au-dessus du niveau (convention Revit : 1,20 m). */
 export const CUT_HEIGHT = 1.2;
@@ -57,6 +58,13 @@ export class PlanView {
   ctx: CanvasRenderingContext2D;
   cam = { cx: 5, cy: 4, scale: 50 };
   hoverId: Id | null = null;
+  /** Pointillé imposé (éléments démolis). */
+  forcedDash: number[] | null = null;
+  /** Masquage / isolement temporaire (HH/HI de Revit), géré par l'application. */
+  isTempHidden(id: Id): boolean {
+    return this.app.isTempHidden(id);
+  }
+
   /** Cotes temporaires modifiables affichées lors du dernier rendu. */
   editableDims: { pos: Vec2; value: number; apply: (value: number) => void }[] = [];
   /** Menu contextuel (clic droit avec l'outil de sélection). */
@@ -95,6 +103,7 @@ export class PlanView {
     this.disposers.push(app.project.onChange(() => this.requestDraw()));
     this.disposers.push(app.on('selection', () => this.requestDraw()));
     this.disposers.push(app.on('options', () => this.requestDraw()));
+    this.disposers.push(app.on('tempvis', () => this.requestDraw()));
     this.disposers.push(
       app.on('tool', () => {
         this.tool = createTool(app.tool, this);
@@ -412,8 +421,10 @@ export class PlanView {
   /** Éléments visibles dans cette vue, par ordre de priorité de sélection. */
   visibleElements(): Element[] {
     const order: Element['kind'][] = ['door', 'window', 'opening', 'text', 'column', 'dimension', 'component', 'railing', 'stair', 'section', 'wall', 'grid', 'shaft', 'room', 'ceiling', 'floor', 'roof'];
+    const settings = this.settings;
     const els = this.project.elements.filter((e) => {
       if (!this.shown(e.kind)) return false;
+      if (this.isTempHidden(e.id) || elementDisplay(this.project, e, settings) === 'hidden') return false;
       const lv = levelOf(this.project, e);
       return lv === undefined || lv === this.levelId;
     });
@@ -543,10 +554,24 @@ export class PlanView {
     const lvl = this.levelId;
     const below = p.levelBelow(lvl);
     // levelId null : éléments communs à tous les plans (quadrillages, coupes).
+    const settings = this.settings;
     const layer = <K extends ElementKind>(kind: K, name: string, fn: (e: ElementOf<K>) => void, levelId: Id | null = lvl) => {
       if (!this.shown(kind)) return;
       this.layer = name;
-      for (const e of p.ofKind(kind, levelId ?? undefined)) fn(e);
+      for (const e of p.ofKind(kind, levelId ?? undefined)) {
+        if (this.isTempHidden(e.id)) continue;
+        const disp = elementDisplay(p, e, settings);
+        if (disp === 'hidden') continue;
+        if (disp === 'normal') {
+          fn(e);
+          continue;
+        }
+        // Remplacement graphique de phase : existant gris, démoli jaune pointillé, neuf rouge.
+        const c = PHASE_COLORS[disp];
+        this.forcedDash = disp === 'demolished' ? [6, 4] : null;
+        this.drawElement(e, { stroke: c.stroke, fill: c.fill, width: 1.2 });
+        this.forcedDash = null;
+      }
     };
     if (below && this.settings.underlay !== false) layer('wall', 'SOUS-COUCHE', (w) => this.drawWallUnderlay(w), below.id);
     layer('floor', 'SOLS', (f) => this.drawFloor(f));
@@ -617,7 +642,7 @@ export class PlanView {
     ctx.save();
     ctx.strokeStyle = color;
     ctx.lineWidth = width;
-    ctx.setLineDash(dash);
+    ctx.setLineDash(this.forcedDash ?? dash);
     this.path([a, b], false);
     ctx.stroke();
     ctx.restore();
@@ -633,7 +658,7 @@ export class PlanView {
       ctx.fill();
     }
     if (style.stroke) {
-      ctx.setLineDash(dash);
+      ctx.setLineDash(this.forcedDash ?? dash);
       ctx.strokeStyle = style.stroke;
       ctx.lineWidth = style.width ?? 1;
       ctx.stroke();
@@ -856,6 +881,7 @@ export class PlanView {
       ctx.strokeStyle = stroke;
       ctx.lineWidth = lw;
       ctx.lineCap = 'round';
+      ctx.setLineDash(this.forcedDash ?? []);
       this.path([p0L, p1L], false);
       ctx.stroke();
       this.path([p0R, p1R], false);

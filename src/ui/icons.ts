@@ -62,4 +62,6 @@ export const ICONS: Record<string, string> = {
   svgFile: svg('<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5"/><path d="M8 17c2-6 6-6 8 0"/>'),
   dxf: svg('<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5"/><path d="M8 13h8M8 16h5M8 19h7"/>'),
   info: svg('<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01"/>'),
+  demolish: svg('<path d="M14 4l6 6-3 3-6-6z" fill="currentColor" fill-opacity=".15"/><path d="M11 7L3 15v3h3l8-8"/><path d="M15 17l2 2M18 14l2 2M13 20l1 1" stroke-dasharray="1 2"/>'),
+  phases: svg('<rect x="3" y="5" width="6" height="14" rx="1"/><rect x="10" y="5" width="5" height="14" rx="1" stroke-dasharray="2 2"/><rect x="16" y="5" width="5" height="14" rx="1" fill="currentColor" fill-opacity=".2"/>'),
 };

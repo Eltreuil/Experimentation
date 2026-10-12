@@ -7,7 +7,7 @@ import type { ViewHost } from '../views/viewHost';
 import { clear, h, perFrame } from './dom';
 import { lengthField, numberField, selectField } from './fields';
 import { ICONS } from './icons';
-import { helpDialog, levelsDialog, projectInfoDialog, typesDialog, visibilityDialog } from './dialogs';
+import { helpDialog, levelsDialog, phasesDialog, projectInfoDialog, typesDialog, visibilityDialog } from './dialogs';
 
 export interface FileActions {
   printSheet(): void;
@@ -60,6 +60,7 @@ export const TOOL_LABELS: Record<ToolName, string> = {
   rotate: 'Modifier | Rotation',
   mirror: 'Modifier | Symétrie',
   array: 'Modifier | Réseau',
+  demolish: 'Modifier | Démolir',
 };
 
 type TabId = 'architecture' | 'annotate' | 'modify' | 'view' | 'manage';
@@ -218,6 +219,7 @@ export class Ribbon {
             ],
           },
           { title: 'Mesure', buttons: [{ label: 'Mesurer', icon: 'measure', tool: 'measure', shortcut: 'ME' }] },
+          { title: 'Phases', buttons: [{ label: 'Démolir', icon: 'demolish', tool: 'demolish', shortcut: 'DM', title: 'Démolir des éléments existants dans la phase de la vue' }] },
         ];
       case 'view':
         return [
@@ -257,6 +259,7 @@ export class Ribbon {
               { label: 'Types', icon: 'types', action: () => typesDialog(app) },
               { label: 'Familles', icon: 'component', action: () => familyEditor(app), shortcut: 'FA', title: 'Éditeur de familles paramétriques' },
               { label: 'Infos projet', icon: 'info', action: () => projectInfoDialog(app), title: 'Informations du cartouche' },
+              { label: 'Phases', icon: 'phases', action: () => phasesDialog(app), title: 'Phases du projet' },
             ],
           },
           {

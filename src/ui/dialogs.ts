@@ -377,6 +377,48 @@ export function wallLayersDialog(app: App, typeId: string): void {
   modal('Modifier la structure du mur', body, { wide: true });
 }
 
+/** Phases du projet (Gérer > Phases) : liste ordonnée, renommage, ajout. */
+export function phasesDialog(app: App): void {
+  const p = app.project;
+  const body = h('div');
+  const render = () => {
+    clear(body);
+    const table = h('table', { class: 'edit-table' });
+    table.append(h('thead', {}, h('tr', {}, h('th', {}, '#'), h('th', {}, 'Phase'), h('th', {}, 'Éléments créés'), h('th', {}, 'Éléments démolis'), h('th', {}, ''))));
+    const tb = h('tbody');
+    p.phases.forEach((ph, i) => {
+      const created = p.elements.filter((e) => (e.phaseCreated ?? p.phases[0].id) === ph.id).length;
+      const demolished = p.elements.filter((e) => e.phaseDemolished === ph.id).length;
+      tb.append(
+        h('tr', {},
+          h('td', {}, String(i + 1)),
+          h('td', {}, textField(ph.name, (v) => { p.transact('Renommer la phase', () => (ph.name = v || ph.name)); render(); })),
+          h('td', {}, String(created)),
+          h('td', {}, String(demolished)),
+          h('td', {},
+            h('button', {
+              class: 'btn small danger',
+              disabled: p.phases.length <= 1 || created > 0 || demolished > 0,
+              title: created || demolished ? 'Phase utilisée' : '',
+              onclick: () => { p.transact('Supprimer la phase', (d) => (d.phases = (d.phases ?? []).filter((x) => x.id !== ph.id))); render(); },
+            }, 'Supprimer'),
+          ),
+        ),
+      );
+    });
+    table.append(tb);
+    body.append(
+      h('p', { class: 'muted' }, 'Les phases sont listées dans l’ordre chronologique. Chaque élément a une phase de création et éventuellement une phase de démolition ; chaque vue affiche une phase avec un filtre (propriétés de la vue).'),
+      table,
+      h('div', { class: 'modal-actions left' },
+        h('button', { class: 'btn primary', onclick: () => { p.transact('Nouvelle phase', (d) => (d.phases = [...p.phases, { id: newId('ph'), name: `Phase ${p.phases.length + 1}` }])); render(); } }, '+ Ajouter une phase'),
+      ),
+    );
+  };
+  render();
+  modal('Phases', body, { wide: true });
+}
+
 export function helpDialog(): void {
   const shortcuts: [string, string][] = [
     ['MU / PO / FE', 'Mur / Porte / Fenêtre'],
@@ -396,6 +438,9 @@ export function helpDialog(): void {
     ['VG / ZE', 'Visibilité-graphismes / Zoom étendu'],
     ['FA', 'Éditeur de familles paramétriques'],
     ['TS', 'Sélectionner toutes les occurrences du même type'],
+    ['DM', 'Démolir (phases)'],
+    ['HH / HI / HR', 'Masquer / isoler temporairement / réinitialiser'],
+    ['PN / UP', 'Épingler / désépingler'],
     ['Clic droit', 'Menu contextuel (sélection, copie vers niveaux…)'],
     ['MO', 'Modifier (sélection)'],
     ['Ctrl+Z / Ctrl+Y', 'Annuler / Rétablir'],

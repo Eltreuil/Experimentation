@@ -2,8 +2,10 @@ import { wallDir, wallLength, wallOutline, wallTypeThickness, add, mul, type Ope
 import { evaluateFamily, type FamilyResult } from './family';
 import { defaultFamilies } from './familyLibrary';
 import { detectRoom } from './rooms';
+import { DEFAULT_PHASES } from './phases';
 import type {
   Component,
+  Phase,
   Room,
   FamilyDef,
   Hosted,
@@ -210,6 +212,14 @@ export class Project {
     return this.data.windowTypes.find((t) => t.id === id) ?? this.data.windowTypes[0];
   }
 
+  /** Phase dans laquelle les nouveaux éléments sont créés (phase de la vue active). */
+  activePhase: Id | null = null;
+
+  get phases(): Phase[] {
+    if (!this.data.phases?.length) this.data.phases = structuredClone(DEFAULT_PHASES);
+    return this.data.phases;
+  }
+
   get families(): FamilyDef[] {
     return this.data.families ?? (this.data.families = []);
   }
@@ -357,16 +367,16 @@ export class Project {
     const levels = new Set(rooms.map((r) => r.levelId));
     for (const lv of levels) {
       const sig = JSON.stringify([
-        this.elements.filter((e) => e.kind === 'wall' && e.levelId === lv).map((w) => (w.kind === 'wall' ? [w.a, w.b, this.thickness(w)] : 0)),
+        this.elements.filter((e) => e.kind === 'wall' && e.levelId === lv).map((w) => (w.kind === 'wall' ? [w.a, w.b, this.thickness(w), w.phaseCreated, w.phaseDemolished] : 0)),
         this.elements.filter((e) => e.kind === 'column' && e.levelId === lv).map((c) => (c.kind === 'column' ? [c.pos, c.width] : 0)),
-        rooms.filter((r) => r.levelId === lv).map((r) => r.seed),
+        rooms.filter((r) => r.levelId === lv).map((r) => [r.seed, r.phaseCreated]),
       ]);
       if (this.roomBoundarySig.get(lv) === sig) continue;
       this.roomBoundarySig.set(lv, sig);
       this.invalidate();
       for (const r of rooms) {
         if (r.levelId !== lv) continue;
-        const pts = detectRoom(this, lv, r.seed!);
+        const pts = detectRoom(this, lv, r.seed!, r.phaseCreated ?? this.phases[0]?.id);
         if (pts) {
           r.points = pts;
           r.notEnclosed = undefined;
@@ -406,6 +416,7 @@ export class Project {
   // Mutations (à appeler dans transact)
 
   add<T extends Element>(el: T): T {
+    if (!el.phaseCreated && this.activePhase) el.phaseCreated = this.activePhase;
     this.data.elements[el.id] = el;
     return el;
   }
@@ -507,6 +518,7 @@ export function normalize(data: ProjectData): ProjectData {
     windowTypes: data.windowTypes ?? [],
     elements: migrateElements(data.elements ?? {}),
     families: data.families ?? defaultFamilies(),
+    phases: data.phases?.length ? data.phases : structuredClone(DEFAULT_PHASES),
     viewSettings: data.viewSettings ?? {},
     info: data.info ?? {},
   };

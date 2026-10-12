@@ -1,6 +1,7 @@
 import { bounds, lineIntersect, norm, perp, add, mul, sub, pointInPolygon, polygonArea } from './geometry';
 import type { Project } from './project';
-import type { Id, Vec2 } from './types';
+import type { Column, Id, Vec2, Wall } from './types';
+import { phaseStatus } from './phases';
 
 /**
  * Rasterise les murs d'un niveau sur une grille fine. Utilisé pour détecter
@@ -13,13 +14,19 @@ class WallRaster {
   readonly origin: Vec2;
   readonly solid: Uint8Array;
 
-  constructor(project: Project, levelId: Id, margin = 1) {
-    const walls = project.ofKind('wall', levelId);
+  constructor(project: Project, levelId: Id, margin = 1, phaseId?: Id) {
+    // Seuls les murs présents dans la phase délimitent les pièces.
+    const present = (e: Wall | Column) => {
+      if (!phaseId) return true;
+      const st = phaseStatus(project, e, phaseId);
+      return st === 'existing' || st === 'new';
+    };
+    const walls = project.ofKind('wall', levelId).filter(present);
     const polys = walls.map((w) => {
       const o = project.outline(w);
       return [o.aL, o.bL, o.bR, o.aR];
     });
-    for (const c of project.ofKind('column', levelId)) {
+    for (const c of project.ofKind('column', levelId).filter(present)) {
       const h = c.width / 2;
       polys.push([
         { x: c.pos.x - h, y: c.pos.y - h },
@@ -174,8 +181,8 @@ export function simplifyPolygon(pts: Vec2[], tol: number): Vec2[] {
 }
 
 /** Détecte le contour de la pièce fermée contenant le point p, ou null si la zone n'est pas close. */
-export function detectRoom(project: Project, levelId: Id, p: Vec2): Vec2[] | null {
-  const r = new WallRaster(project, levelId);
+export function detectRoom(project: Project, levelId: Id, p: Vec2, phaseId?: Id): Vec2[] | null {
+  const r = new WallRaster(project, levelId, 1, phaseId);
   const [i, j] = r.cellOf(p);
   const mark = r.flood(i, j);
   if (!mark) return null;
@@ -203,6 +210,7 @@ export function buildingFootprint(project: Project, levelId: Id): Vec2[] | null 
 function snapToFaces(project: Project, levelId: Id, pts: Vec2[]): Vec2[] {
   const faces: { p: Vec2; d: Vec2 }[] = [];
   for (const w of project.ofKind('wall', levelId)) {
+    if (w.phaseDemolished) continue;
     const o = project.outline(w);
     faces.push({ p: o.aL, d: norm(sub(o.bL, o.aL)) }, { p: o.aR, d: norm(sub(o.bR, o.aR)) });
   }

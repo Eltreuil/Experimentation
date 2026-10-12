@@ -219,3 +219,30 @@ describe('pièces délimitées', () => {
     expect(p.get<'room'>(sejour.id)!.notEnclosed).toBeFalsy();
   });
 });
+
+describe('phases', () => {
+  it('statut, filtres et démolition', async () => {
+    const { demolish } = await import('../src/model/edit');
+    const { elementDisplay, phaseStatus } = await import('../src/model/phases');
+    const p = new Project(sampleProject());
+    const [existing, neuf] = p.phases;
+    const w = p.ofKind('wall', 'lvl-0')[0];
+    // Sans phase explicite : élément existant, vu depuis la phase « Nouvelle construction ».
+    expect(phaseStatus(p, w, neuf.id)).toBe('existing');
+    // Démolition : la porte hébergée est démolie avec son mur.
+    const n = p.transact('d', () => demolish(p, [w.id], neuf.id));
+    expect(n).toBeGreaterThan(1);
+    expect(phaseStatus(p, w, neuf.id)).toBe('demolished');
+    expect(phaseStatus(p, w, existing.id)).toBe('new');
+    expect(elementDisplay(p, w, { phase: neuf.id, phaseFilter: 'proposed' })).toBe('hidden');
+    expect(elementDisplay(p, w, { phase: neuf.id, phaseFilter: 'all' })).toBe('demolished');
+    // Un élément créé dans la phase courante ne peut pas être démoli.
+    p.activePhase = neuf.id;
+    let nw!: Wall;
+    p.transact('n', () => (nw = wall(p, [20, 0], [24, 0])));
+    expect(nw.phaseCreated).toBe(neuf.id);
+    expect(p.transact('d2', () => demolish(p, [nw.id], neuf.id))).toBe(0);
+    expect(elementDisplay(p, nw, { phase: existing.id, phaseFilter: 'complete' })).toBe('hidden');
+    expect(elementDisplay(p, nw, { phase: neuf.id, phaseFilter: 'all' })).toBe('new');
+  });
+});

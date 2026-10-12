@@ -14,7 +14,7 @@ import {
   WallDimensionTool,
   WallTool,
 } from './draw';
-import { AlignTool, MeasureTool, OffsetTool, SplitTool, TransformTool, TrimTool } from './modify';
+import { AlignTool, DemolishTool, MeasureTool, OffsetTool, SplitTool, TransformTool, TrimTool } from './modify';
 import { SelectTool } from './select';
 import type { Tool } from './tool';
 
@@ -66,6 +66,8 @@ export function createTool(name: ToolName, view: PlanView): Tool {
       return new TrimTool(view, 'single');
     case 'split':
       return new SplitTool(view);
+    case 'demolish':
+      return new DemolishTool(view);
     case 'move':
     case 'copy':
     case 'rotate':

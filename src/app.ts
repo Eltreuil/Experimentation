@@ -1,4 +1,5 @@
 import { Project } from './model/project';
+import { viewPhase } from './model/phases';
 import type { ElementKind, Id, ProjectData, RoofShape } from './model/types';
 
 export type ToolName =
@@ -31,7 +32,8 @@ export type ToolName =
   | 'copy'
   | 'rotate'
   | 'mirror'
-  | 'array';
+  | 'array'
+  | 'demolish';
 
 /** Outils de modification qui agissent sur la sélection courante (elle est conservée). */
 export const SELECTION_TOOLS: ToolName[] = ['move', 'copy', 'rotate', 'mirror', 'array'];
@@ -97,7 +99,7 @@ export interface ToolOptions {
   arrayCount: number;
 }
 
-type AppEvent = 'selection' | 'view' | 'tool' | 'status' | 'options' | 'views';
+type AppEvent = 'selection' | 'view' | 'tool' | 'status' | 'options' | 'views' | 'tempvis';
 
 export const TOOL_KINDS: Partial<Record<ToolName, ElementKind>> = {
   wall: 'wall',
@@ -136,6 +138,7 @@ export class App {
     this.openViews = [this.view];
     this.options = this.defaultOptions();
     this.project.onChange(() => {
+      this.syncActivePhase();
       let changed = false;
       for (const id of [...this.selection]) {
         if (!this.project.data.elements[id]) {
@@ -215,10 +218,17 @@ export class App {
 
   setView(v: ViewDef): void {
     this.view = v;
+    this.syncActivePhase();
     if (!this.openViews.some((o) => viewKey(o) === viewKey(v))) this.openViews.push(v);
     if (v.kind !== 'plan' && this.tool !== 'select') this.setTool('select');
     this.emit('views');
     this.emit('view');
+  }
+
+  /** Les nouveaux éléments sont créés dans la phase de la vue active. */
+  syncActivePhase(): void {
+    const settings = this.project.data.viewSettings?.[viewKey(this.view)];
+    this.project.activePhase = viewPhase(this.project, settings).phase;
   }
 
   closeView(v: ViewDef): void {
@@ -251,6 +261,41 @@ export class App {
     this.emit('tool');
   }
 
+  /** Masquage / isolement temporaire par vue (non enregistré dans le projet). */
+  private tempVis = new Map<string, { hidden: Set<Id>; isolated: Set<Id> | null }>();
+
+  tempVisibility(): { hidden: Set<Id>; isolated: Set<Id> | null } {
+    const key = viewKey(this.view);
+    let t = this.tempVis.get(key);
+    if (!t) this.tempVis.set(key, (t = { hidden: new Set(), isolated: null }));
+    return t;
+  }
+
+  /** HH : masquer la sélection ; HI : isoler la sélection ; HR : réinitialiser. */
+  tempHide(mode: 'hide' | 'isolate' | 'reset'): void {
+    const t = this.tempVisibility();
+    if (mode === 'reset') {
+      t.hidden.clear();
+      t.isolated = null;
+    } else if (this.selection.size) {
+      if (mode === 'hide') for (const id of this.selection) t.hidden.add(id);
+      else t.isolated = new Set(this.selection);
+      this.clearSelection();
+    }
+    this.status(mode === 'reset' ? 'Masquage temporaire réinitialisé.' : 'Masquage temporaire actif (HR pour réinitialiser).');
+    this.emit('tempvis');
+  }
+
+  isTempHidden(id: Id): boolean {
+    const t = this.tempVisibility();
+    if (t.hidden.has(id)) return true;
+    if (t.isolated && !t.isolated.has(id)) {
+      const e = this.project.get(id);
+      return !(e && 'hostId' in e && t.isolated.has(e.hostId));
+    }
+    return false;
+  }
+
   setOptions(patch: Partial<ToolOptions>): void {
     Object.assign(this.options, patch);
     this.emit('options');
@@ -278,7 +323,9 @@ export class App {
 
   deleteSelection(): void {
     if (this.selection.size === 0) return;
-    const ids = [...this.selection];
+    const ids = [...this.selection].filter((id) => !this.project.get(id)?.pinned);
+    if (ids.length < this.selection.size) this.status('Les éléments épinglés ne sont pas supprimés (désépinglez-les d’abord).');
+    if (!ids.length) return;
     this.project.transact('Supprimer', () => this.project.remove(ids));
     this.clearSelection();
   }

@@ -216,6 +216,12 @@ const SHORTCUTS: Record<string, ToolName | (() => void)> = {
   VG: () => visibilityDialog(app),
   AH: () => attachSelectedWalls(app),
   FA: () => familyEditor(app),
+  DM: 'demolish',
+  HH: () => app.tempHide('hide'),
+  HI: () => app.tempHide('isolate'),
+  HR: () => app.tempHide('reset'),
+  PN: () => app.project.transact('Épingler', () => app.selection.forEach((id) => { const e = app.project.get(id); if (e) e.pinned = true; })),
+  UP: () => app.project.transact('Désépingler', () => app.selection.forEach((id) => { const e = app.project.get(id); if (e) e.pinned = undefined; })),
   TS: () => {
     const id = [...app.selection][0];
     if (id) selectAllInstances(app, id, 'project');

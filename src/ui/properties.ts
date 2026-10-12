@@ -2,9 +2,11 @@ import type { App } from '../app';
 import { flipSelectedDoors } from '../commands';
 import { polygonArea, polygonCentroid, polygonPerimeter, stairRisers, wallLength, add, mul, wallDir, dist } from '../model/geometry';
 import { formatLength, levelOf } from '../model/project';
+import { PHASE_FILTERS, isPhased, viewPhase } from '../model/phases';
+import { viewKey } from '../app';
 import { familyEditor, formatParam, paramField } from './familyEditor';
 import { wallLayersDialog } from './dialogs';
-import { KIND_LABELS, type Element, type ElementKind, type Id } from '../model/types';
+import { KIND_LABELS, type Element, type ElementKind, type Id, type ViewSettings } from '../model/types';
 import { clear, h, perFrame } from './dom';
 import { ROOF_SHAPES } from './ribbon';
 import { checkField, colorField, lengthField, numberField, readonlyField, row, selectField, textField } from './fields';
@@ -81,6 +83,19 @@ export class PropertiesPanel {
       const titles = { '3d': 'Vue 3D', elevation: 'Élévation', schedule: 'Nomenclature', section: 'Coupe' } as const;
       this.header(root, titles[v.kind]);
     }
+    if (v.kind !== 'schedule') {
+      const key = viewKey(v);
+      const settings = p.data.viewSettings?.[key];
+      const { phase, filter } = viewPhase(p, settings);
+      const setView = (patch: Partial<ViewSettings>) =>
+        this.edit('Phase de la vue', () => {
+          p.data.viewSettings = p.data.viewSettings ?? {};
+          p.data.viewSettings[key] = { ...(p.data.viewSettings[key] ?? {}), ...patch };
+        });
+      const ph = this.section(root, 'Phases');
+      ph.append(row('Phase', selectField(phase, p.phases.map((x) => ({ value: x.id, label: x.name })), (val) => setView({ phase: val })), 'Les nouveaux éléments sont créés dans cette phase'));
+      ph.append(row('Filtre de phase', selectField(filter, PHASE_FILTERS, (val) => setView({ phaseFilter: val }))));
+    }
     const proj = this.section(root, 'Projet');
     proj.append(row('Nom du projet', textField(p.data.name, (val) => this.edit('Nom du projet', () => (p.data.name = val || p.data.name)))));
     proj.append(
@@ -131,6 +146,12 @@ export class PropertiesPanel {
     const common = (s: HTMLElement) => {
       s.append(row('Repère', textField(e.mark ?? '', (val) => this.edit('Repère', () => (e.mark = val || undefined)))));
       s.append(row('Commentaires', textField(e.comments ?? '', (val) => this.edit('Commentaires', () => (e.comments = val || undefined)))));
+      if (!isPhased(e)) return;
+      const ph = this.section(root, 'Phases');
+      const phases = p.phases.map((x) => ({ value: x.id, label: x.name }));
+      ph.append(row('Phase de création', selectField(e.phaseCreated ?? p.phases[0].id, phases, (val) => this.edit('Phase de création', () => (e.phaseCreated = val)))));
+      ph.append(row('Phase de démolition', selectField(e.phaseDemolished ?? '', [{ value: '', label: 'Aucune' }, ...phases], (val) => this.edit('Phase de démolition', () => (e.phaseDemolished = val || null)))));
+      ph.append(row('Épinglé', checkField(!!e.pinned, (val) => this.edit(val ? 'Épingler' : 'Désépingler', () => (e.pinned = val || undefined))), 'Un élément épinglé ne peut pas être déplacé ni supprimé'));
     };
 
     switch (e.kind) {

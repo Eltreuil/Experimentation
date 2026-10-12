@@ -3,6 +3,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { App, ElevationDir } from '../app';
 import { elementMeshes } from '../model/mesh';
 import { elementSignature } from '../model/signature';
+import { PHASE_COLORS, elementDisplay } from '../model/phases';
 import type { Id, Section } from '../model/types';
 import { sectionLook } from './planView';
 
@@ -119,6 +120,12 @@ export class View3D {
       }),
     );
     this.disposers.push(app.on('selection', () => this.updateSelection()));
+    this.disposers.push(
+      app.on('tempvis', () => {
+        this.dirtyModel = true;
+        this.requestRender();
+      }),
+    );
 
     const el = this.renderer.domElement;
     el.addEventListener('pointerdown', (e) => (this.downAt = { x: e.clientX, y: e.clientY }));
@@ -316,10 +323,13 @@ export class View3D {
 
     const alive = new Set<Id>();
     let rebuilt = 0;
+    const settings = p.data.viewSettings?.[this.viewKey];
     for (const e of p.elements) {
-      if (hidden.has(e.kind)) continue;
+      if (hidden.has(e.kind) || this.app.isTempHidden(e.id)) continue;
+      const disp = elementDisplay(p, e, settings);
+      if (disp === 'hidden') continue;
       alive.add(e.id);
-      const sig = elementSignature(p, e);
+      const sig = `${disp}|${elementSignature(p, e)}`;
       if (this.entries.get(e.id)?.sig === sig) continue;
       this.dropEntry(e.id);
       rebuilt++;
@@ -331,7 +341,8 @@ export class View3D {
         geo.setAttribute('position', new THREE.Float32BufferAttribute(s.positions, 3));
         geo.computeVertexNormals();
         geo.computeBoundingSphere();
-        const mat = this.material(s.color, s.material);
+        // Remplacement de couleur selon la phase (existant, démoli, neuf).
+        const mat = this.material(disp === 'normal' ? s.color : PHASE_COLORS[disp].solid, s.material);
         const mesh = new THREE.Mesh(geo, mat);
         mesh.castShadow = s.material !== 'glass';
         mesh.receiveShadow = true;

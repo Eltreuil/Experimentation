@@ -2,7 +2,7 @@ import type { ScheduleCategory } from '../app';
 import { polygonArea, polygonPerimeter, wallLength } from './geometry';
 import { meshVolume, elementMeshes } from './mesh';
 import { formatLength, type Project } from './project';
-import type { Id } from './types';
+import type { Element, Id } from './types';
 
 export interface ScheduleColumn {
   key: string;
@@ -31,6 +31,12 @@ export function buildSchedule(p: Project, category: ScheduleCategory): Schedule 
   const u = p.data.units;
   const lvlName = (id: Id | undefined) => (id ? p.level(id)?.name ?? '?' : '');
   const lvlOrder = (id: Id | undefined) => (id ? p.level(id)?.elevation ?? 0 : 0);
+  const phaseName = (id: Id | null | undefined) => p.phases.find((ph) => ph.id === id)?.name;
+  const phaseLabel = (e: Element) => {
+    const created = phaseName(e.phaseCreated) ?? p.phases[0]?.name ?? '';
+    const demo = phaseName(e.phaseDemolished);
+    return demo ? `${created} → démoli (${demo})` : created;
+  };
   let title = '';
   let columns: ScheduleColumn[] = [];
   let rows: ScheduleRow[] = [];
@@ -47,6 +53,7 @@ export function buildSchedule(p: Project, category: ScheduleCategory): Schedule 
         { key: 'height', label: 'Hauteur', align: 'right' },
         { key: 'area', label: 'Surface', align: 'right', total: (xs) => `${sum(xs).toFixed(2)} m²` },
         { key: 'volume', label: 'Volume', align: 'right', total: (xs) => `${sum(xs).toFixed(2)} m³` },
+        { key: 'phase', label: 'Phase' },
       ];
       rows = p
         .ofKind('wall')
@@ -68,6 +75,7 @@ export function buildSchedule(p: Project, category: ScheduleCategory): Schedule 
               height: formatLength(w.height, u, true),
               area: `${area.toFixed(2)} m²`,
               volume: `${volume.toFixed(2)} m³`,
+              phase: phaseLabel(w),
             },
             values: { length, area, volume },
           };
@@ -86,6 +94,7 @@ export function buildSchedule(p: Project, category: ScheduleCategory): Schedule 
         ...(isDoor ? [] : [{ key: 'sill', label: 'Allège', align: 'right' as const }]),
         { key: 'level', label: 'Niveau' },
         { key: 'host', label: 'Mur hôte' },
+        { key: 'phase', label: 'Phase' },
         { key: 'count', label: 'Nombre', align: 'right', total: (xs) => String(sum(xs)) },
       ];
       const items = isDoor ? p.ofKind('door') : p.ofKind('window');
@@ -103,6 +112,7 @@ export function buildSchedule(p: Project, category: ScheduleCategory): Schedule 
               sill: o.kind === 'window' ? formatLength(o.sill, u, true) : '',
               level: lvlName(host?.levelId),
               host: host ? p.wallType(host.typeId).name : '',
+              phase: phaseLabel(o),
               count: '1',
             },
             values: { count: 1 },

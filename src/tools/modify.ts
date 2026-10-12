@@ -2,6 +2,7 @@
 // scinder, déplacer, copier, rotation, symétrie, réseau.
 import {
   alignTo,
+  demolish,
   arrayElements,
   duplicate,
   elementsCenter,
@@ -472,5 +473,33 @@ export class TransformTool implements Tool {
         view.drawElement(ghost, { stroke: SELECT, width: 1.5, fill: 'rgba(26,115,232,0.08)' });
       }
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Démolir (phases)
+
+export class DemolishTool implements Tool {
+  readonly hint = 'Démolir : cliquez les éléments existants à démolir dans la phase de la vue.';
+  private hover: Id | null = null;
+
+  constructor(private view: PlanView) {}
+
+  onMove(p: PointerInfo): void {
+    this.hover = this.view.hitTest(p.raw);
+  }
+
+  onDown(): void {
+    if (!this.hover) return;
+    const proj = this.view.project;
+    const phase = proj.activePhase ?? proj.phases[proj.phases.length - 1].id;
+    const id = this.hover;
+    const n = proj.transact('Démolir', () => demolish(proj, [id], phase));
+    this.view.app.status(n ? `${n} élément(s) démoli(s) dans la phase « ${proj.phases.find((ph) => ph.id === phase)?.name} ».` : 'Cet élément est créé dans la phase de la vue : supprimez-le plutôt que de le démolir.');
+  }
+
+  draw(): void {
+    const e = this.hover ? this.view.project.get(this.hover) : undefined;
+    if (e) this.view.drawElement(e, { stroke: '#c79a00', width: 2.5, fill: 'rgba(242,194,0,0.25)' });
   }
 }

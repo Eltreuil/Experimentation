@@ -40,11 +40,35 @@ npm run dist         # installateurs pour le système courant, dans desktop/rele
 - **Pièces** : un clic dans un espace fermé crée la pièce et calcule sa surface exacte.
 - **Quadrillages** et **niveaux**.
 
+### Familles paramétriques (`FA`)
+Système de familles comparable aux familles chargeables de Revit :
+- **Paramètres** de type ou d'occurrence : longueur, nombre, entier, angle, oui/non, matériau, texte.
+- **Formules** : `Longueur / 2`, `if([Avec chaises]; 6; 0)`, `max(1; rounddown(Longueur / 60 cm))`.
+  - Opérateurs : `+ − × / ^ %`, comparaisons, `et`, `ou`, `non`.
+  - Fonctions : `min`, `max`, `round`, `rounddown`, `roundup`, `sqrt`, `sin`, `cos`…
+  - Unités `mm`, `cm`, `m`, `°`. Les noms avec espaces s'écrivent entre crochets.
+  - L'éditeur détecte les références circulaires.
+- **Types** : jeux de valeurs nommés (par ex. « 180 × 90 », « 240 × 100 »). Modifier un type met à jour toutes ses occurrences.
+- **Géométrie paramétrique** : boîtes et cylindres dont chaque cote est une formule.
+  - Visibilité conditionnelle.
+  - Répétitions : un nombre d'exemplaires avec un pas, la variable `i` vaut 0, 1, 2… Les chaises se répartissent ainsi automatiquement le long d'une table.
+  - Matériaux pilotés par paramètre, vitrage.
+- **Symboles 2D** paramétriques pour le plan, ou contour automatique des volumes.
+- **Éditeur de familles** avec aperçu plan et 3D en direct, duplication, import/export de fichiers `.ofam.json`, placement direct dans le projet.
+- **Bibliothèque fournie** : table avec chaises automatiques, lit avec chevets, linéaire de cuisine (caissons, évier, plaque), étagère à tablettes, et une vingtaine de familles de mobilier, sanitaires et équipements.
+
+### Murs composites et quantitatifs
+- Structure des types de mur en **couches** (« Modifier la structure ») : finition, isolation, structure, membrane, lame d'air. L'épaisseur suit les couches.
+- Couches dessinées en plan selon le niveau de zoom (hachures de structure, motif d'isolant).
+- **Quantitatif des matériaux** : surfaces et volumes par matériau, ouvertures déduites.
+- Export IFC des couches (`IfcMaterialLayerSet`).
+
 ### Modification (onglet Modifier)
 - Aligner, Décaler, Déplacer, Copier (multiple), Rotation (angle saisi ou cliqué, accrochage à 15°), Symétrie (avec ou sans copie), Réseau linéaire.
 - Ajuster/prolonger pour former un angle, Prolonger jusqu'à une limite, Scinder.
 - Poignées d'extrémités et de sommets ; les murs raccordés s'étirent pour rester joints.
-- Copier/coller, annuler/rétablir sur 200 niveaux.
+- Copier/coller, **copier vers d'autres niveaux**, **sélectionner toutes les occurrences** du même type (`TS`), annuler/rétablir sur 200 niveaux.
+- **Menu contextuel** au clic droit en plan.
 
 ### Saisie précise
 - Accrochage aux extrémités, milieux, sommets, centres, intersections de quadrillages, au point le plus proche et en orthogonal.
@@ -64,7 +88,7 @@ npm run dist         # installateurs pour le système courant, dans desktop/rele
 - **Visibilité/Graphismes** (`VG`) : afficher ou masquer chaque catégorie, vue par vue.
 
 ### Nomenclatures
-Murs (longueur, surface nette, volume), portes, fenêtres, pièces, sols et composants, avec totaux et export CSV.
+Murs (longueur, surface nette, volume), portes, fenêtres, pièces, sols, composants (par famille et type) et quantitatif des matériaux, avec totaux et export CSV.
 
 ### Feuilles et exports
 - **Feuille A3** avec cartouche : projet, maître d'ouvrage, auteur, phase, échelle, date, nord, échelle graphique. Impression directe (ou PDF) et export SVG vectoriel.
@@ -84,6 +108,7 @@ Murs (longueur, surface nette, volume), portes, fenêtres, pièces, sols et comp
 | `PI` `QU` | Pièce, quadrillage | `AH` | Attacher le haut des murs |
 | `CO` `CM` | Cote, cotes de mur | `VG` `ZE` | Visibilité, zoom étendu |
 | `TX` `CE` | Texte, coupe | `MO` | Modifier (sélection) |
+| `FA` | Éditeur de familles | `TS` | Sélectionner le même type |
 
 À cela s'ajoutent `Ctrl+Z`/`Ctrl+Y`, `Ctrl+C`/`Ctrl+V`, `Ctrl+A`, `Ctrl+S`/`Ctrl+O` et `Suppr`. `Échap` ou un clic droit termine la saisie en cours. En plan, la molette zoome et le clic milieu déplace la vue.
 
@@ -93,7 +118,9 @@ Murs (longueur, surface nette, volume), portes, fenêtres, pièces, sols et comp
 src/
   model/      Cœur BIM sans DOM : types, géométrie, raccords de murs, historique,
               contraintes, détection de pièces, maillages 3D, toits, opérations
-              de modification (edit.ts), bibliothèque de composants, nomenclatures
+              de modification (edit.ts), formules (expr.ts), familles
+              paramétriques (family.ts, familyLibrary.ts), nomenclatures,
+              signatures pour la 3D incrémentale (signature.ts)
   io/         IFC4 (STEP), SVG/DXF/feuilles (vector.ts), fichiers projet
   tools/      Outils interactifs du plan : création (draw.ts), modification
               (modify.ts), sélection (select.ts)
@@ -103,7 +130,7 @@ desktop/      Application de bureau Electron et configuration des installateurs
 .github/      CI (tests + build), publication GitHub Pages, releases multiplateformes
 ```
 
-Toutes les longueurs sont stockées en mètres. La même géométrie sert au rendu 3D, aux quantités, aux exports et à l'IFC. Pour automatiser l'application, `window.openbim` donne accès à l'application depuis la console.
+Toutes les longueurs sont stockées en mètres. La vue 3D ne reconstruit que les éléments dont la géométrie a changé, et les raccords de murs utilisent un index spatial. La même géométrie sert au rendu 3D, aux quantités, aux exports et à l'IFC. Pour automatiser l'application, `window.openbim` donne accès à l'application depuis la console.
 
 ## Contribuer
 
@@ -112,6 +139,6 @@ Les contributions sont les bienvenues ; voir [CONTRIBUTING.md](CONTRIBUTING.md).
 ## Limites connues
 
 - Les murs sont droits uniquement (pas de murs courbes).
-- Pas d'éditeur de familles paramétriques : la bibliothèque de composants est fixe.
+- Les portes et fenêtres utilisent des types simples (largeur, hauteur, allège), pas encore des familles paramétriques.
 - L'IFC est seulement exporté, pas importé.
 - Pas de travail collaboratif en temps réel.

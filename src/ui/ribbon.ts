@@ -1,6 +1,7 @@
 import type { App, ToolName } from '../app';
 import { attachSelectedWalls, copySelection, detachSelectedWalls, floorFromWalls, paste, roofFromWalls } from '../commands';
 import { familyEditor } from './familyEditor';
+import { copyToLevelsDialog, selectAllInstances } from './contextMenu';
 import type { RoofShape } from '../model/types';
 import type { ViewHost } from '../views/viewHost';
 import { clear, h, perFrame } from './dom';
@@ -189,6 +190,8 @@ export class Ribbon {
             buttons: [
               { label: 'Copier', icon: 'copy', action: () => copySelection(app), shortcut: 'Ctrl+C', enabled: hasSel },
               { label: 'Coller', icon: 'paste', action: () => paste(app), shortcut: 'Ctrl+V' },
+              { label: 'Vers niveaux', icon: 'copyLevel', action: () => copyToLevelsDialog(app), enabled: hasSel, title: 'Copier la sélection vers d’autres niveaux' },
+              { label: 'Même type', icon: 'select', action: () => { const id = [...app.selection][0]; if (id) selectAllInstances(app, id, 'project'); }, enabled: hasSel, shortcut: 'TS', title: 'Sélectionner toutes les occurrences du même type' },
             ],
           },
           {

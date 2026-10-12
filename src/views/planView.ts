@@ -57,6 +57,8 @@ export class PlanView {
   ctx: CanvasRenderingContext2D;
   cam = { cx: 5, cy: 4, scale: 50 };
   hoverId: Id | null = null;
+  /** Menu contextuel (clic droit avec l'outil de sélection). */
+  onContextMenu: ((x: number, y: number, hit: Id | null) => void) | null = null;
   /** Calque courant (export DXF/SVG). */
   layer = '0';
   /** Vrai pendant un export vectoriel (tailles de texte non bornées). */
@@ -252,7 +254,17 @@ export class PlanView {
     if (this.panning) {
       const moved = (this.panning as { moved?: boolean }).moved;
       this.panning = null;
-      if (e.button === 2 && !moved) this.escape();
+      if (e.button === 2 && !moved) {
+        // Clic droit : termine la saisie en cours, sinon ouvre le menu contextuel.
+        if (this.tool.cancel?.()) {
+          this.requestDraw();
+        } else if (this.app.tool !== 'select') {
+          this.app.setTool('select');
+        } else if (this.onContextMenu) {
+          const r = this.canvas.getBoundingClientRect();
+          this.onContextMenu(e.clientX, e.clientY, this.hitTest(this.s2w(e.clientX - r.left, e.clientY - r.top)));
+        }
+      }
       return;
     }
     if (e.button !== 0) return;

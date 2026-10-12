@@ -1,5 +1,6 @@
 import { viewKey, type App, type ViewDef } from '../app';
 import { clear, h } from '../ui/dom';
+import { planContextMenu } from '../ui/contextMenu';
 import { PlanView } from './planView';
 import { ScheduleView } from './scheduleView';
 import { View3D, type VisualStyle } from './view3d';
@@ -86,6 +87,7 @@ export class ViewHost {
     switch (v.kind) {
       case 'plan': {
         const pv = new PlanView(this.app, this.content, v.levelId);
+        pv.onContextMenu = (x, y, hit) => planContextMenu(this.app, x, y, hit, () => pv.zoomExtents());
         const cam = this.planCams.get(v.levelId) ?? [...this.planCams.values()].pop();
         if (cam) {
           pv.cam = { ...cam };

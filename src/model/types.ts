@@ -26,9 +26,22 @@ export interface WallType {
   function: 'exterior' | 'interior';
   /** Mur de base ou mur-rideau (panneaux vitrés et meneaux). */
   family?: 'basic' | 'curtain';
+  /**
+   * Structure du mur, de la face extérieure vers la face intérieure.
+   * L'extérieur est à droite du sens de tracé (a→b). Si présente, l'épaisseur
+   * du type est la somme des couches.
+   */
+  layers?: WallLayer[];
   /** Mur-rideau : espacement des meneaux verticaux et des traverses horizontales. */
   curtainSpacing?: number;
   curtainRowSpacing?: number;
+}
+
+export interface WallLayer {
+  name: string;
+  thickness: number;
+  color: string;
+  function: 'structure' | 'insulation' | 'finish' | 'membrane' | 'air';
 }
 
 export interface DoorType {

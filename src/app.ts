@@ -36,7 +36,7 @@ export type ToolName =
 /** Outils de modification qui agissent sur la sélection courante (elle est conservée). */
 export const SELECTION_TOOLS: ToolName[] = ['move', 'copy', 'rotate', 'mirror', 'array'];
 
-export type ScheduleCategory = 'wall' | 'door' | 'window' | 'room' | 'floor' | 'component';
+export type ScheduleCategory = 'wall' | 'door' | 'window' | 'room' | 'floor' | 'component' | 'material';
 export type ElevationDir = 'N' | 'S' | 'E' | 'W';
 
 export type ViewDef =

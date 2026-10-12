@@ -350,6 +350,10 @@ export class Project {
    * niveau supérieur). Appelé après chaque modification.
    */
   syncConstraints(): void {
+    // Épaisseur des murs composites = somme des couches.
+    for (const t of this.data.wallTypes) {
+      if (t.layers?.length) t.thickness = Math.round(t.layers.reduce((a, l) => a + l.thickness, 0) * 1e6) / 1e6;
+    }
     for (const e of this.elements) {
       if (e.kind !== 'wall' || !e.topLevelId) continue;
       const top = this.level(e.topLevelId);

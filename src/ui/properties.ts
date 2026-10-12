@@ -3,6 +3,7 @@ import { flipSelectedDoors } from '../commands';
 import { polygonArea, polygonPerimeter, stairRisers, wallLength, add, mul, wallDir, dist } from '../model/geometry';
 import { formatLength, levelOf } from '../model/project';
 import { familyEditor, formatParam, paramField } from './familyEditor';
+import { wallLayersDialog } from './dialogs';
 import { KIND_LABELS, type Element, type ElementKind, type Id } from '../model/types';
 import { clear, h, perFrame } from './dom';
 import { ROOF_SHAPES } from './ribbon';
@@ -453,9 +454,10 @@ export class PropertiesPanel {
     if (kind === 'wall') {
       const t = p.wallType(typeId);
       s.append(row('Nom du type', textField(t.name, (v) => this.edit('Renommer le type', () => (t.name = v || t.name)))));
-      s.append(row('Épaisseur', L(t.thickness, (m) => (t.thickness = m), 0.01)));
+      s.append(row('Épaisseur', t.layers?.length ? readonlyField(formatLength(t.thickness, u, true)) : L(t.thickness, (m) => (t.thickness = m), 0.01)));
       s.append(row('Fonction', selectField(t.function, [{ value: 'exterior', label: 'Extérieur' }, { value: 'interior', label: 'Intérieur' }], (v) => this.edit('Fonction', () => (t.function = v)))));
       s.append(row('Couleur', colorField(t.color, (v) => this.edit('Couleur', () => (t.color = v)))));
+      s.append(row('Structure', h('button', { class: 'btn small', onclick: () => wallLayersDialog(this.app, t.id) }, t.layers?.length ? `${t.layers.length} couches — modifier…` : 'Modifier…')));
       s.append(row('Famille', selectField(t.family ?? 'basic', [{ value: 'basic', label: 'Mur de base' }, { value: 'curtain', label: 'Mur-rideau' }], (v) => this.edit('Famille de mur', () => (t.family = v)))));
       if (t.family === 'curtain') {
         s.append(row('Espacement des meneaux', L(t.curtainSpacing ?? 1.5, (m) => (t.curtainSpacing = m), 0.3)));

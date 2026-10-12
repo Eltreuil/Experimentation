@@ -154,6 +154,7 @@ export function exportIFC(p: Project, opts: IfcOptions = {}): string {
   };
 
   const wallIfc = new Map<Id, { id: number; pl: number }>();
+  const wallsByType = new Map<Id, number[]>();
 
   /** Représentation B-rep facettée à partir du maillage de l'élément (géométries non extrudables). */
   const brepOf = (e: Element, elevation: number): number | null => {
@@ -197,6 +198,9 @@ export function exportIFC(p: Project, opts: IfcOptions = {}): string {
           `IFCWALL('${guid()}',$,${str(t.name)},$,${str(t.name)},${ref(pl)},${rep ? ref(rep) : '$'},${str(e.mark)},.STANDARD.)`,
         );
         wallIfc.set(e.id, { id, pl });
+        const list = wallsByType.get(e.typeId) ?? [];
+        list.push(id);
+        wallsByType.set(e.typeId, list);
         contain(e.levelId, id);
         break;
       }
@@ -367,6 +371,24 @@ export function exportIFC(p: Project, opts: IfcOptions = {}): string {
           );
     w.add(`IFCRELFILLSELEMENT('${guid()}',$,$,$,${ref(opening)},${ref(fill)})`);
     contain(host.levelId, fill);
+  }
+
+  // --- Matériaux : composition en couches des murs.
+  const materials = new Map<string, number>();
+  const material = (name: string) => {
+    let m = materials.get(name);
+    if (!m) {
+      m = w.add(`IFCMATERIAL(${str(name)},$,$)`);
+      materials.set(name, m);
+    }
+    return m;
+  };
+  for (const [typeId, walls] of wallsByType) {
+    const t = p.wallType(typeId);
+    const layers = t.layers?.length ? t.layers : [{ name: t.name, thickness: t.thickness, function: 'structure' }];
+    const ids = layers.map((l) => w.add(`IFCMATERIALLAYER(${ref(material(l.name))},${num(l.thickness)},${l.function === 'air' ? '.T.' : '$'},${str(l.name)},$,$,$)`));
+    const set = w.add(`IFCMATERIALLAYERSET(${list(ids)},${str(t.name)},$)`);
+    w.add(`IFCRELASSOCIATESMATERIAL('${guid()}',$,$,$,${list(walls)},${ref(set)})`);
   }
 
   for (const [levelId, ids] of contained) {

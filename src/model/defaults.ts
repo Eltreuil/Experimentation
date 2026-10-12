@@ -12,9 +12,43 @@ export function emptyProject(name = 'Nouveau projet'): ProjectData {
       { id: 'lvl-1', name: 'Niveau 1', elevation: 3.0, height: 2.7 },
     ],
     wallTypes: [
-      { id: 'wt-ext', name: 'Mur extérieur - Béton 20 + ITE 10', thickness: 0.3, color: '#d9cbb3', function: 'exterior' },
-      { id: 'wt-int', name: 'Cloison - Plaque de plâtre 7', thickness: 0.07, color: '#f2f2f2', function: 'interior' },
-      { id: 'wt-ref', name: 'Mur de refend - Brique 15', thickness: 0.15, color: '#c98f6b', function: 'interior' },
+      {
+        id: 'wt-ext',
+        name: 'Mur extérieur - Béton 20 + ITE 10',
+        thickness: 0.3,
+        color: '#d9cbb3',
+        function: 'exterior',
+        layers: [
+          { name: 'Enduit extérieur', thickness: 0.015, color: '#efe6d5', function: 'finish' },
+          { name: 'Isolant PSE', thickness: 0.1, color: '#f6e7a8', function: 'insulation' },
+          { name: 'Béton armé', thickness: 0.18, color: '#bfbab0', function: 'structure' },
+          { name: 'Enduit plâtre', thickness: 0.005, color: '#ffffff', function: 'finish' },
+        ],
+      },
+      {
+        id: 'wt-int',
+        name: 'Cloison - Plaque de plâtre 7',
+        thickness: 0.07,
+        color: '#f2f2f2',
+        function: 'interior',
+        layers: [
+          { name: 'Plaque de plâtre BA13', thickness: 0.0125, color: '#ffffff', function: 'finish' },
+          { name: 'Laine minérale', thickness: 0.045, color: '#f6e7a8', function: 'insulation' },
+          { name: 'Plaque de plâtre BA13', thickness: 0.0125, color: '#ffffff', function: 'finish' },
+        ],
+      },
+      {
+        id: 'wt-ref',
+        name: 'Mur de refend - Brique 15',
+        thickness: 0.15,
+        color: '#c98f6b',
+        function: 'interior',
+        layers: [
+          { name: 'Enduit plâtre', thickness: 0.01, color: '#ffffff', function: 'finish' },
+          { name: 'Brique terre cuite', thickness: 0.13, color: '#c98f6b', function: 'structure' },
+          { name: 'Enduit plâtre', thickness: 0.01, color: '#ffffff', function: 'finish' },
+        ],
+      },
       { id: 'wt-cw', name: 'Mur-rideau - Meneaux 150', thickness: 0.12, color: '#5f666d', function: 'exterior', family: 'curtain', curtainSpacing: 1.5, curtainRowSpacing: 1.2 },
     ],
     doorTypes: [

@@ -166,6 +166,48 @@ export function buildSchedule(p: Project, category: ScheduleCategory): Schedule 
         });
       break;
     }
+    case 'material': {
+      title = 'Quantitatif des matériaux';
+      columns = [
+        { key: 'material', label: 'Matériau' },
+        { key: 'category', label: 'Catégorie' },
+        { key: 'function', label: 'Fonction' },
+        { key: 'area', label: 'Surface', align: 'right', total: (xs) => `${sum(xs).toFixed(2)} m²` },
+        { key: 'volume', label: 'Volume', align: 'right', total: (xs) => `${sum(xs).toFixed(3)} m³` },
+      ];
+      const FN: Record<string, string> = { structure: 'Structure', insulation: 'Isolation', finish: 'Finition', membrane: 'Membrane', air: 'Lame d’air' };
+      const acc = new Map<string, { id: Id; cells: Record<string, string>; values: Record<string, number> }>();
+      const addQty = (id: Id, material: string, category: string, fn: string, area: number, volume: number) => {
+        const key = `${material}|${category}|${fn}`;
+        const g = acc.get(key) ?? { id, cells: { material, category, function: fn, area: '', volume: '' }, values: { area: 0, volume: 0 } };
+        g.values.area += area;
+        g.values.volume += volume;
+        acc.set(key, g);
+      };
+      for (const w of p.ofKind('wall')) {
+        const t = p.wallType(w.typeId);
+        const openings = p.openingSpans(w).reduce((a, o) => a + (o.end - o.start) * (Math.min(o.top, w.height) - o.bottom), 0);
+        const area = Math.max(0, wallLength(w) * w.height - openings);
+        const layers = t.layers?.length ? t.layers : [{ name: t.name, thickness: t.thickness, function: 'structure' }];
+        for (const l of layers) addQty(w.id, l.name, 'Murs', FN[l.function] ?? '', area, area * l.thickness);
+      }
+      for (const f of p.ofKind('floor')) {
+        const area = Math.abs(polygonArea(f.points));
+        addQty(f.id, 'Dalle béton', 'Sols', 'Structure', area, area * f.thickness);
+      }
+      for (const r of p.ofKind('roof')) {
+        const area = Math.abs(polygonArea(r.points)) / Math.cos(((r.shape === 'flat' ? 0 : r.slope) * Math.PI) / 180);
+        addQty(r.id, 'Couverture / charpente', 'Toits', 'Structure', area, area * r.thickness);
+      }
+      for (const c of p.ofKind('ceiling')) {
+        const area = Math.abs(polygonArea(c.points));
+        addQty(c.id, 'Plaque de plâtre (plafond)', 'Plafonds', 'Finition', area, area * c.thickness);
+      }
+      rows = [...acc.values()]
+        .map((g): ScheduleRow => ({ ...g, cells: { ...g.cells, area: `${g.values.area.toFixed(2)} m²`, volume: `${g.values.volume.toFixed(3)} m³` } }))
+        .sort((a, b) => a.cells.category.localeCompare(b.cells.category) || a.cells.material.localeCompare(b.cells.material));
+      break;
+    }
     case 'component': {
       title = 'Nomenclature des composants';
       columns = [

@@ -8,6 +8,7 @@ import {
   mul,
   norm,
   perp,
+  lerp,
   pointInPolygon,
   roofFacets,
   roofSlopeEdges,
@@ -20,7 +21,7 @@ import {
   wallPieces,
 } from '../model/geometry';
 import { formatLength, levelOf, type Project } from '../model/project';
-import type { Ceiling, Column, Component, Dimension, Door, Element, ElementKind, ElementOf, Floor, Grid, Id, Railing, Room, Roof, Section, Shaft, Stair, TextNote, Vec2, ViewSettings, Wall, WallOpening, Window } from '../model/types';
+import type { Ceiling, Column, Component, Dimension, Door, Element, ElementKind, ElementOf, Floor, Grid, Id, Railing, Room, Roof, Section, Shaft, Stair, TextNote, Vec2, ViewSettings, Wall, WallLayer, WallOpening, Window } from '../model/types';
 import { placer } from '../model/family';
 import type { PointerInfo, SnapKind, SnapResult, Tool } from '../tools/tool';
 import { createTool } from '../tools';
@@ -832,7 +833,10 @@ export class PlanView {
     for (const pc of pieces) {
       const [p0L, p1L, p1R, p0R] = pc.quad;
       this.poly(pc.quad, { fill: style?.fill ?? t.color });
-      if (!style) this.hatchWall(pc.quad, t.function === 'exterior');
+      // Niveau de détail moyen : couches du mur composite dès que le zoom le permet.
+      const detailed = !style && t.layers?.length && t.thickness * this.cam.scale > 6;
+      if (detailed) this.drawLayers(pc.quad, t.layers!, t.thickness);
+      else if (!style) this.hatchWall(pc.quad, t.function === 'exterior');
       ctx.save();
       ctx.strokeStyle = stroke;
       ctx.lineWidth = lw;
@@ -852,6 +856,44 @@ export class PlanView {
       ctx.restore();
     }
     if (style && pieces.length === 0) this.line(w.a, w.b, stroke, lw);
+  }
+
+  /** Couches d'un mur composite, de la face extérieure (droite) vers l'intérieure (gauche). */
+  private drawLayers(quad: [Vec2, Vec2, Vec2, Vec2], layers: WallLayer[], total: number): void {
+    const [p0L, p1L, p1R, p0R] = quad;
+    let acc = 0;
+    layers.forEach((l, i) => {
+      const f0 = acc / total;
+      acc += l.thickness;
+      const f1 = acc / total;
+      const strip = [lerp(p0R, p0L, f0), lerp(p1R, p1L, f0), lerp(p1R, p1L, f1), lerp(p0R, p0L, f1)];
+      this.poly(strip, { fill: l.color });
+      if (l.function === 'structure') this.hatchWall(strip, true);
+      else if (l.function === 'insulation') this.insulationHatch(strip);
+      if (i < layers.length - 1) this.line(strip[3], strip[2], '#6b7177', 0.5);
+    });
+  }
+
+  /** Motif d'isolant (zigzag) dans une bande de couche. */
+  private insulationHatch(strip: Vec2[]): void {
+    if (this.exporting || this.cam.scale < 60) return;
+    const [a0, a1, b1, b0] = strip;
+    const L = dist(a0, a1);
+    const w = dist(a0, b0);
+    if (L < 1e-3 || w < 1e-3) return;
+    const n = Math.max(2, Math.round(L / (w * 0.8)));
+    const pts: Vec2[] = [];
+    for (let i = 0; i <= n; i++) {
+      const t = i / n;
+      pts.push(i % 2 ? lerp(b0, b1, t) : lerp(a0, a1, t));
+    }
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+    ctx.lineWidth = 0.6;
+    this.path(pts, false);
+    ctx.stroke();
+    ctx.restore();
   }
 
   private drawCurtainWall(w: Wall, style?: DrawStyle): void {

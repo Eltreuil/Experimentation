@@ -208,3 +208,20 @@ describe('nomenclatures et export', () => {
     expect('0123').toContain(g[0]);
   });
 });
+
+describe('murs composites', () => {
+  it('l’épaisseur suit la somme des couches et le quantitatif répartit les volumes', () => {
+    const p = new Project(sampleProject());
+    const t = p.data.wallTypes.find((x) => x.id === 'wt-ext')!;
+    expect(t.thickness).toBeCloseTo(0.3);
+    p.transact('couche', () => t.layers!.push({ name: 'Bardage bois', thickness: 0.03, color: '#a07040', function: 'finish' }));
+    expect(p.wallType('wt-ext').thickness).toBeCloseTo(0.33);
+    const s = buildSchedule(p, 'material');
+    const beton = s.rows.find((r) => r.cells.material === 'Béton armé')!;
+    const isolant = s.rows.find((r) => r.cells.material === 'Isolant PSE')!;
+    // Même surface, volumes proportionnels à l'épaisseur des couches.
+    expect(beton.values.area).toBeCloseTo(isolant.values.area);
+    expect(beton.values.volume / isolant.values.volume).toBeCloseTo(1.8);
+    expect(s.rows.some((r) => r.cells.category === 'Sols')).toBe(true);
+  });
+});

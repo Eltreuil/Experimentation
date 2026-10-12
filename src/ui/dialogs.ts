@@ -1,5 +1,6 @@
 import { viewKey, type App } from '../app';
-import { KIND_LABELS, type ElementKind, type ViewSettings } from '../model/types';
+import { KIND_LABELS, type ElementKind, type ViewSettings, type WallLayer } from '../model/types';
+import { formatLength } from '../model/project';
 import { addLevel, copyWallsToLevel, deleteLevel } from '../commands';
 import { newId } from '../model/project';
 import type { DoorType, WallType, WindowType } from '../model/types';
@@ -173,15 +174,16 @@ export function typesDialog(app: App, initial: 'wall' | 'door' | 'window' = 'wal
         h('button', { class: 'btn small danger', disabled: used(id), title: used(id) ? 'Type utilisé dans le projet' : '', onclick: () => { del(); render(); } }, 'Supprimer'),
       );
     if (tab === 'wall') {
-      table.append(h('thead', {}, h('tr', {}, h('th', {}, 'Nom'), h('th', {}, 'Épaisseur'), h('th', {}, 'Fonction'), h('th', {}, 'Couleur'), h('th', {}, ''))));
+      table.append(h('thead', {}, h('tr', {}, h('th', {}, 'Nom'), h('th', {}, 'Épaisseur'), h('th', {}, 'Fonction'), h('th', {}, 'Couleur'), h('th', {}, 'Couches'), h('th', {}, ''))));
       for (const t of p.data.wallTypes) {
         tb.append(h('tr', {},
           h('td', {}, textField(t.name, (v) => p.transact('Type', () => (t.name = v || t.name)))),
-          h('td', {}, lengthField(t.thickness, u, (m) => p.transact('Type', () => (t.thickness = m)), { min: 0.01 })),
+          h('td', {}, t.layers?.length ? h('span', { class: 'prop-readonly' }, formatLength(t.thickness, u, true)) : lengthField(t.thickness, u, (m) => p.transact('Type', () => (t.thickness = m)), { min: 0.01 })),
           h('td', {}, selectField(t.function, [{ value: 'exterior', label: 'Extérieur' }, { value: 'interior', label: 'Intérieur' }], (v) => p.transact('Type', () => (t.function = v)))),
           h('td', {}, colorField(t.color, (v) => p.transact('Type', () => (t.color = v)))),
+          h('td', {}, h('button', { class: 'btn small', onclick: () => wallLayersDialog(app, t.id) }, t.layers?.length ? `Structure (${t.layers.length})` : 'Structure…')),
           actions(t.id,
-            () => p.transact('Dupliquer le type', (d) => d.wallTypes.push({ ...t, id: newId('wt'), name: `${t.name} (2)` } as WallType)),
+            () => p.transact('Dupliquer le type', (d) => d.wallTypes.push({ ...structuredClone(t), id: newId('wt'), name: `${t.name} (2)` } as WallType)),
             () => p.transact('Supprimer le type', (d) => (d.wallTypes = d.wallTypes.filter((x) => x.id !== t.id)))),
         ));
       }
@@ -306,6 +308,73 @@ export function projectInfoDialog(app: App): void {
     h('p', { class: 'muted' }, 'Ces informations apparaissent dans le cartouche des feuilles imprimées et exportées.'),
   );
   modal('Informations du projet', body);
+}
+
+const LAYER_FUNCTIONS: { value: WallLayer['function']; label: string }[] = [
+  { value: 'structure', label: 'Structure' },
+  { value: 'insulation', label: 'Isolation' },
+  { value: 'finish', label: 'Finition' },
+  { value: 'membrane', label: 'Membrane' },
+  { value: 'air', label: 'Lame d’air' },
+];
+
+/** « Modifier la structure » d'un type de mur : couches de l'extérieur vers l'intérieur. */
+export function wallLayersDialog(app: App, typeId: string): void {
+  const p = app.project;
+  const body = h('div');
+  const type = () => p.data.wallTypes.find((t) => t.id === typeId);
+  const edit = (label: string, fn: (layers: WallLayer[]) => void) => {
+    p.transact(label, () => {
+      const t = type();
+      if (!t) return;
+      t.layers = t.layers ?? [{ name: 'Structure', thickness: t.thickness, color: t.color, function: 'structure' }];
+      fn(t.layers);
+    });
+    render();
+  };
+  const render = () => {
+    clear(body);
+    const t = type();
+    if (!t) return;
+    const u = p.data.units;
+    const layers = t.layers ?? [{ name: 'Structure', thickness: t.thickness, color: t.color, function: 'structure' as const }];
+    const table = h('table', { class: 'edit-table' });
+    table.append(h('thead', {}, h('tr', {}, h('th', {}, '#'), h('th', {}, 'Matériau / couche'), h('th', {}, 'Fonction'), h('th', {}, 'Épaisseur'), h('th', {}, 'Couleur'), h('th', {}, ''))));
+    const tb = h('tbody');
+    tb.append(h('tr', {}, h('td', { colspan: '6', class: 'muted' }, '▲ Face extérieure (à droite du sens de tracé)')));
+    layers.forEach((l, i) =>
+      tb.append(
+        h('tr', {},
+          h('td', {}, String(i + 1)),
+          h('td', {}, textField(l.name, (v) => edit('Couche', (ls) => (ls[i].name = v || ls[i].name)))),
+          h('td', {}, selectField(l.function, LAYER_FUNCTIONS, (v) => edit('Couche', (ls) => (ls[i].function = v)))),
+          h('td', {}, lengthField(l.thickness, u, (m) => edit('Épaisseur de couche', (ls) => (ls[i].thickness = m)), { min: 0.001 })),
+          h('td', {}, colorField(l.color, (v) => edit('Couleur de couche', (ls) => (ls[i].color = v)))),
+          h('td', { class: 'nowrap' },
+            h('button', { class: 'mini-btn', title: 'Monter', disabled: i === 0, onclick: () => edit('Ordre des couches', (ls) => ls.splice(i - 1, 0, ls.splice(i, 1)[0])) }, '↑'),
+            h('button', { class: 'mini-btn', title: 'Descendre', disabled: i === layers.length - 1, onclick: () => edit('Ordre des couches', (ls) => ls.splice(i + 1, 0, ls.splice(i, 1)[0])) }, '↓'),
+            h('button', { class: 'mini-btn', title: 'Supprimer', disabled: layers.length <= 1, onclick: () => edit('Supprimer la couche', (ls) => ls.splice(i, 1)) }, '×'),
+          ),
+        ),
+      ),
+    );
+    tb.append(h('tr', {}, h('td', { colspan: '6', class: 'muted' }, '▼ Face intérieure')));
+    table.append(tb);
+    // Aperçu de la coupe du mur.
+    const total = layers.reduce((a, l) => a + l.thickness, 0);
+    const bar = h('div', { class: 'layer-bar' }, ...layers.map((l) => h('div', { style: `flex:${Math.max(1, Math.round(l.thickness * 1000))} 1 0;background:${l.color}`, title: `${l.name} — ${formatLength(l.thickness, u, true)}` })));
+    body.append(
+      h('div', { class: 'inline-form' }, h('strong', {}, t.name), h('span', { class: 'muted' }, `Épaisseur totale : ${formatLength(total, u, true)}`)),
+      bar,
+      table,
+      h('div', { class: 'modal-actions left' },
+        h('button', { class: 'btn small primary', onclick: () => edit('Ajouter une couche', (ls) => ls.push({ name: 'Nouvelle couche', thickness: 0.02, color: '#dddddd', function: 'finish' })) }, '+ Couche'),
+        t.layers ? h('button', { class: 'btn small', onclick: () => { p.transact('Mur simple', () => { const x = type(); if (x) delete x.layers; }); render(); } }, 'Revenir à un mur simple') : null,
+      ),
+    );
+  };
+  render();
+  modal('Modifier la structure du mur', body, { wide: true });
 }
 
 export function helpDialog(): void {

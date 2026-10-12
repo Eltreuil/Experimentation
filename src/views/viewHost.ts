@@ -15,7 +15,7 @@ export function viewTitle(app: App, v: ViewDef): string {
     case 'elevation':
       return `Élévation : ${{ N: 'Nord', S: 'Sud', E: 'Est', W: 'Ouest' }[v.dir]}`;
     case 'schedule':
-      return `Nomenclature : ${{ wall: 'Murs', door: 'Portes', window: 'Fenêtres', room: 'Pièces', floor: 'Sols', component: 'Composants' }[v.category]}`;
+      return `Nomenclature : ${{ wall: 'Murs', door: 'Portes', window: 'Fenêtres', room: 'Pièces', floor: 'Sols', component: 'Composants', material: 'Matériaux' }[v.category]}`;
     case 'section':
       return `Coupe : ${app.project.get<'section'>(v.sectionId)?.name ?? '?'}`;
   }

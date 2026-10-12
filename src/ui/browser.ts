@@ -94,6 +94,7 @@ export class ProjectBrowser {
         this.node('Pièces', { kind: 'schedule', category: 'room' }, 'schedule'),
         this.node('Sols', { kind: 'schedule', category: 'floor' }, 'schedule'),
         this.node('Composants', { kind: 'schedule', category: 'component' }, 'schedule'),
+        this.node('Matériaux (quantitatif)', { kind: 'schedule', category: 'material' }, 'schedule'),
       ]),
       this.group(
         'levels',

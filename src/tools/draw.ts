@@ -15,7 +15,7 @@ import {
 } from '../model/geometry';
 import { formatLength, newId, parseLength } from '../model/project';
 import { detectRoom } from '../model/rooms';
-import type { Ceiling, Column, Component, Dimension, Door, Grid, Id, Railing, Room, Section, Shaft, Stair, TextNote, Vec2, Wall, WallOpening, Window } from '../model/types';
+import type { DetailLine, FilledRegion, Ceiling, Column, Component, Dimension, Door, Grid, Id, Railing, Room, Section, Shaft, Stair, TextNote, Vec2, Wall, WallOpening, Window } from '../model/types';
 import { nextSectionName, wallChainPoints } from '../model/edit';
 import { promptDialog } from '../ui/dialogs';
 import type { PlanView } from '../views/planView';
@@ -342,10 +342,10 @@ export class SketchTool implements Tool {
 
   constructor(
     private view: PlanView,
-    private kind: 'floor' | 'roof' | 'room' | 'shaft' | 'ceiling' | 'railing',
+    private kind: 'floor' | 'roof' | 'room' | 'shaft' | 'ceiling' | 'railing' | 'region',
   ) {
     this.input = new LengthInput(view);
-    const label = { floor: 'Sol', roof: 'Toit', room: 'Pièce', shaft: 'Trémie', ceiling: 'Faux-plafond', railing: 'Garde-corps' }[kind];
+    const label = { floor: 'Sol', roof: 'Toit', room: 'Pièce', shaft: 'Trémie', ceiling: 'Faux-plafond', railing: 'Garde-corps', region: 'Zone remplie' }[kind];
     this.hint =
       kind === 'railing'
         ? 'Garde-corps : cliquez les points du tracé. Double-clic ou Entrée pour terminer.'
@@ -408,6 +408,10 @@ export class SketchTool implements Tool {
       return;
     }
     if (pts.length < 3 || Math.abs(polygonArea(pts)) < 1e-4) return;
+    if (this.kind === 'region') {
+      proj.transact('Zone remplie', () => proj.add<FilledRegion>({ id: newId('zr'), kind: 'region', levelId, points: pts, pattern: o.regionPattern, color: o.regionColor, border: true }));
+      return;
+    }
     if (this.kind === 'shaft') {
       proj.transact('Trémie', () => proj.add<Shaft>({ id: newId('tr'), kind: 'shaft', levelId, points: pts, height: o.shaftHeight }));
       return;
@@ -850,6 +854,72 @@ export class WallDimensionTool implements Tool {
     if (!c) return;
     for (let i = 0; i < c.pts.length - 1; i++) {
       this.view.drawDimension({ id: '_d', kind: 'dimension', levelId: this.view.levelId, a: c.pts[i], b: c.pts[i + 1], offset: c.offset }, this.view.colors.select);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Lignes de détail (dessin 2D en chaîne)
+
+export class DetailLineTool implements Tool {
+  readonly hint = 'Ligne de détail : cliquez les points successifs (chaîne). Échap pour terminer. Tapez une longueur + Entrée.';
+  private start: Vec2 | null = null;
+  private cursor: Vec2 | null = null;
+  private input: LengthInput;
+
+  constructor(private view: PlanView) {
+    this.input = new LengthInput(view);
+  }
+
+  anchor(): Vec2 | null {
+    return this.start;
+  }
+
+  private add(a: Vec2, b: Vec2): void {
+    if (dist(a, b) < 1e-4) return;
+    const proj = this.view.project;
+    proj.transact('Ligne de détail', () => proj.add<DetailLine>({ id: newId('ld'), kind: 'detail', levelId: this.view.levelId, a, b, style: this.view.app.options.detailStyle }));
+  }
+
+  onMove(p: PointerInfo): void {
+    this.cursor = p.point;
+  }
+
+  onDown(p: PointerInfo): void {
+    if (this.start) this.add(this.start, p.point);
+    this.start = p.point;
+  }
+
+  onKey(e: KeyboardEvent): boolean {
+    if (!this.start || !this.cursor) return false;
+    const r = this.input.key(e);
+    if (r === 'enter') {
+      const l = this.input.value();
+      const d = norm(sub(this.cursor, this.start));
+      if (l && (d.x || d.y)) {
+        const end = add(this.start, mul(d, l));
+        this.add(this.start, end);
+        this.start = end;
+      }
+      return true;
+    }
+    return r !== null;
+  }
+
+  onDblClick(): void {
+    this.start = null;
+  }
+
+  cancel(): boolean {
+    if (!this.start) return false;
+    this.start = null;
+    return true;
+  }
+
+  draw(): void {
+    if (this.start && this.cursor) {
+      this.view.drawDetail({ id: '_d', kind: 'detail', levelId: this.view.levelId, a: this.start, b: this.cursor, style: this.view.app.options.detailStyle }, this.view.colors.select);
+      this.view.drawTempDimension(this.start, this.cursor, 16);
     }
   }
 }

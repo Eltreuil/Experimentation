@@ -6,7 +6,9 @@ import { PHASE_FILTERS, isPhased, viewPhase } from '../model/phases';
 import { viewKey } from '../app';
 import { familyEditor, formatParam, paramField } from './familyEditor';
 import { wallLayersDialog } from './dialogs';
-import { KIND_LABELS, type Element, type ElementKind, type Id, type ViewSettings } from '../model/types';
+import { KIND_LABELS, type Element, type ElementKind, type Id, type LineStyle, type ViewSettings } from '../model/types';
+import { LINE_STYLES } from '../views/planView';
+import { REGION_PATTERNS } from './ribbon';
 import { clear, h, perFrame } from './dom';
 import { ROOF_SHAPES } from './ribbon';
 import { checkField, colorField, lengthField, numberField, readonlyField, row, selectField, textField } from './fields';
@@ -452,6 +454,33 @@ export class PropertiesPanel {
         c.append(row('Contenu', textField(e.text, (val) => this.edit('Texte', () => (e.text = val || e.text)))));
         c.append(row('Taille (mm papier)', numberField(e.size, (val) => this.edit('Taille', () => (e.size = val)), { min: 1, max: 30, step: 0.5, suffix: 'mm' })));
         c.append(row('Rotation', numberField(e.rotation, (val) => this.edit('Rotation', () => (e.rotation = val)), { step: 15, suffix: '°' })));
+        break;
+      }
+      case 'cad': {
+        this.header(root, 'Import CAO', e.name);
+        const c = this.section(root, 'Fond de plan');
+        c.append(row('Nom', textField(e.name, (val) => this.edit('Nom', () => (e.name = val || e.name)))));
+        c.append(row('Niveau', levelSelect(e.levelId, (id) => (e.levelId = id))));
+        c.append(row('Segments', readonlyField((e.lines.length / 4).toLocaleString('fr-FR'))));
+        c.append(row('Couleur', colorField(e.color, (val) => this.edit('Couleur', () => (e.color = val)))));
+        c.append(row('Rotation', numberField(e.rotation, (val) => this.edit('Rotation', () => (e.rotation = val)), { step: 1, suffix: '°' })));
+        c.append(h('div', { class: 'prop-empty' }, 'Astuce : épinglez le fond de plan (PN) une fois calé, puis redessinez les murs en vous accrochant à ses lignes.'));
+        break;
+      }
+      case 'detail': {
+        this.header(root, 'Ligne de détail', formatLength(dist(e.a, e.b), u, true));
+        const c = this.section(root, 'Graphismes');
+        c.append(row('Style', selectField(e.style, Object.entries(LINE_STYLES).map(([value, st]) => ({ value: value as LineStyle, label: st.label })), (val) => this.edit('Style de ligne', () => (e.style = val)))));
+        c.append(row('Longueur', readonlyField(formatLength(dist(e.a, e.b), u, true))));
+        break;
+      }
+      case 'region': {
+        this.header(root, 'Zone remplie', `${Math.abs(polygonArea(e.points)).toFixed(2)} m²`);
+        const c = this.section(root, 'Graphismes');
+        c.append(row('Motif', selectField(e.pattern, REGION_PATTERNS, (val) => this.edit('Motif', () => (e.pattern = val)))));
+        c.append(row('Couleur', colorField(e.color, (val) => this.edit('Couleur', () => (e.color = val)))));
+        c.append(row('Contour', checkField(e.border, (val) => this.edit('Contour', () => (e.border = val)))));
+        c.append(row('Surface', readonlyField(`${Math.abs(polygonArea(e.points)).toFixed(2)} m²`)));
         break;
       }
       case 'section': {

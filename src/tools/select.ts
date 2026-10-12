@@ -55,6 +55,7 @@ export class SelectTool implements Tool {
       case 'dimension':
       case 'grid':
       case 'section':
+      case 'detail':
         return [
           { id, key: 'a', point: e.a },
           { id, key: 'b', point: e.b },
@@ -65,6 +66,7 @@ export class SelectTool implements Tool {
       case 'shaft':
       case 'ceiling':
       case 'railing':
+      case 'region':
         return e.points.map((p, i) => ({ id, key: i, point: p }));
       default:
         return [];
@@ -293,7 +295,8 @@ function applyMove(e: Element, orig: Element, delta: Vec2, selection: Set<Id>, h
     case 'stair':
     case 'dimension':
     case 'grid':
-    case 'section': {
+    case 'section':
+    case 'detail': {
       const o = orig as typeof e;
       e.a = add(o.a, delta);
       e.b = add(o.b, delta);
@@ -304,7 +307,8 @@ function applyMove(e: Element, orig: Element, delta: Vec2, selection: Set<Id>, h
     case 'roof':
     case 'shaft':
     case 'ceiling':
-    case 'railing': {
+    case 'railing':
+    case 'region': {
       const o = orig as typeof e;
       e.points = o.points.map((p) => add(p, delta));
       if (e.kind === 'room' && o.kind === 'room' && o.seed) e.seed = add(o.seed, delta);
@@ -313,6 +317,7 @@ function applyMove(e: Element, orig: Element, delta: Vec2, selection: Set<Id>, h
     case 'column':
     case 'component':
     case 'text':
+    case 'cad':
       e.pos = add((orig as typeof e).pos, delta);
       break;
     case 'door':

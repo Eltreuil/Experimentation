@@ -1,6 +1,6 @@
 import { Project } from './model/project';
 import { viewPhase } from './model/phases';
-import type { ElementKind, Id, ProjectData, RoofShape } from './model/types';
+import type { ElementKind, Id, LineStyle, ProjectData, RegionPattern, RoofShape } from './model/types';
 
 export type ToolName =
   | 'select'
@@ -33,7 +33,9 @@ export type ToolName =
   | 'rotate'
   | 'mirror'
   | 'array'
-  | 'demolish';
+  | 'demolish'
+  | 'detail'
+  | 'region';
 
 /** Outils de modification qui agissent sur la sélection courante (elle est conservée). */
 export const SELECTION_TOOLS: ToolName[] = ['move', 'copy', 'rotate', 'mirror', 'array'];
@@ -97,6 +99,9 @@ export interface ToolOptions {
   mirrorCopy: boolean;
   multipleCopy: boolean;
   arrayCount: number;
+  detailStyle: LineStyle;
+  regionPattern: RegionPattern;
+  regionColor: string;
 }
 
 type AppEvent = 'selection' | 'view' | 'tool' | 'status' | 'options' | 'views' | 'tempvis';
@@ -191,6 +196,9 @@ export class App {
       mirrorCopy: true,
       multipleCopy: false,
       arrayCount: 3,
+      detailStyle: 'medium',
+      regionPattern: 'hatch',
+      regionColor: '#4a4f55',
     };
   }
 

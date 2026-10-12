@@ -11,6 +11,7 @@ import { h } from './ui/dom';
 import { PropertiesPanel } from './ui/properties';
 import { familyEditor } from './ui/familyEditor';
 import { selectAllInstances } from './ui/contextMenu';
+import { importDxf } from './ui/importCad';
 import { Ribbon, type FileActions } from './ui/ribbon';
 import { ViewHost, viewTitle } from './views/viewHost';
 import { printSVG, shapesToDXF, sheetSVG } from './io/vector';
@@ -61,6 +62,12 @@ function currentSheet(): string | null {
 }
 
 const files: FileActions = {
+  importCad() {
+    void importDxf(app, () => {
+      const plan = host.plan;
+      return plan ? { x: plan.cam.cx, y: plan.cam.cy } : { x: 0, y: 0 };
+    });
+  },
   printSheet() {
     const svg = currentSheet();
     if (svg) printSVG(svg);
@@ -217,6 +224,8 @@ const SHORTCUTS: Record<string, ToolName | (() => void)> = {
   AH: () => attachSelectedWalls(app),
   FA: () => familyEditor(app),
   DM: 'demolish',
+  LD: 'detail',
+  ZR: 'region',
   HH: () => app.tempHide('hide'),
   HI: () => app.tempHide('isolate'),
   HR: () => app.tempHide('reset'),

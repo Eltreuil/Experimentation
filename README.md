@@ -37,7 +37,7 @@ npm run dist         # installateurs pour le système courant, dans desktop/rele
 - **Faux-plafonds** : clic dans une pièce ou contour dessiné.
 - **Escaliers droits** (calcul des marches et formule de Blondel), **garde-corps**, **poteaux**.
 - **Composants** : mobilier (lits, canapé, tables, bureau, armoire), sanitaires (WC, lavabo, baignoire, douche), cuisine, équipements, arbres, voiture.
-- **Pièces** : un clic dans un espace fermé crée la pièce et calcule sa surface exacte.
+- **Pièces délimitées** : un clic dans un espace fermé crée la pièce. Son contour suit ensuite automatiquement les murs, et la pièce signale quand elle n'est plus fermée.
 - **Quadrillages** et **niveaux**.
 
 ### Familles paramétriques (`FA`)
@@ -63,12 +63,30 @@ Système de familles comparable aux familles chargeables de Revit :
 - **Quantitatif des matériaux** : surfaces et volumes par matériau, ouvertures déduites.
 - Export IFC des couches (`IfcMaterialLayerSet`).
 
+### Phases (réhabilitation)
+- Phases du projet (Existant, Nouvelle construction…). Chaque élément a une phase de création et éventuellement une phase de démolition.
+- Chaque vue a une **phase** et un **filtre de phase** :
+  - afficher complet ;
+  - afficher tout, avec existant en gris, démoli en jaune pointillé et neuf en rouge ;
+  - état projeté, démolitions, état existant, nouveau uniquement.
+- Outil **Démolir** (`DM`) : les portes et fenêtres hébergées sont démolies avec leur mur.
+- Pièces délimitées par les murs présents dans leur phase. Colonne Phase dans les nomenclatures.
+
+### Fond de plan et dessin 2D
+- **Importer CAO** (onglet Insérer) : fichiers DXF avec lignes, polylignes, arcs, cercles, ellipses, textes et blocs. Unités détectées ou choisies, positionnement à l'origine ou au centre. Les extrémités et les segments sont **accrochables** pour redessiner un plan existant.
+- **Lignes de détail** (`LD`) : styles fin, moyen, épais, tirets, caché, axe.
+- **Zones remplies** (`ZR`) : hachures, béton, isolant, terre, plein.
+
 ### Modification (onglet Modifier)
 - Aligner, Décaler, Déplacer, Copier (multiple), Rotation (angle saisi ou cliqué, accrochage à 15°), Symétrie (avec ou sans copie), Réseau linéaire.
 - Ajuster/prolonger pour former un angle, Prolonger jusqu'à une limite, Scinder.
 - Poignées d'extrémités et de sommets ; les murs raccordés s'étirent pour rester joints.
 - Copier/coller, **copier vers d'autres niveaux**, **sélectionner toutes les occurrences** du même type (`TS`), annuler/rétablir sur 200 niveaux.
 - **Menu contextuel** au clic droit en plan.
+- **Cotes temporaires modifiables** : cliquez la valeur affichée sur un mur sélectionné (longueur) ou une porte/fenêtre (distances aux extrémités) et tapez la nouvelle cote.
+- **Épingler** (`PN` / `UP`) : un élément épinglé ne peut être ni déplacé ni supprimé.
+- **Masquer / isoler temporairement** (`HH` / `HI`, `HR` pour réinitialiser), vue par vue.
+- Les cloisons raccordées en T suivent le mur que l'on déplace.
 
 ### Saisie précise
 - Accrochage aux extrémités, milieux, sommets, centres, intersections de quadrillages, au point le plus proche et en orthogonal.
@@ -84,7 +102,7 @@ Système de familles comparable aux familles chargeables de Revit :
 - **Plans d'étage** : plan de coupe à 1,20 m, niveau inférieur en grisé, échelle de vue (1/20 à 1/500).
 - **Vue 3D** : orbite, styles visuels, arêtes, ombres, coupe horizontale.
 - **Coupes** : vues coupées avec remplissage des parties coupées (poché), rognées sur la ligne de coupe et sa profondeur.
-- **Élévations** Nord, Sud, Est et Ouest, avec repères de niveaux.
+- **Élévations** Nord, Sud, Est et Ouest, avec repères de niveaux. Les **repères d'élévation** apparaissent en plan ; un double-clic ouvre la vue.
 - **Visibilité/Graphismes** (`VG`) : afficher ou masquer chaque catégorie, vue par vue.
 
 ### Nomenclatures
@@ -109,6 +127,8 @@ Murs (longueur, surface nette, volume), portes, fenêtres, pièces, sols, compos
 | `CO` `CM` | Cote, cotes de mur | `VG` `ZE` | Visibilité, zoom étendu |
 | `TX` `CE` | Texte, coupe | `MO` | Modifier (sélection) |
 | `FA` | Éditeur de familles | `TS` | Sélectionner le même type |
+| `DM` | Démolir | `HH` `HI` `HR` | Masquer, isoler, réinitialiser |
+| `LD` `ZR` | Ligne de détail, zone remplie | `PN` `UP` | Épingler, désépingler |
 
 À cela s'ajoutent `Ctrl+Z`/`Ctrl+Y`, `Ctrl+C`/`Ctrl+V`, `Ctrl+A`, `Ctrl+S`/`Ctrl+O` et `Suppr`. `Échap` ou un clic droit termine la saisie en cours. En plan, la molette zoome et le clic milieu déplace la vue.
 
@@ -140,5 +160,5 @@ Les contributions sont les bienvenues ; voir [CONTRIBUTING.md](CONTRIBUTING.md).
 
 - Les murs sont droits uniquement (pas de murs courbes).
 - Les portes et fenêtres utilisent des types simples (largeur, hauteur, allège), pas encore des familles paramétriques.
-- L'IFC est seulement exporté, pas importé.
+- L'IFC est seulement exporté, pas importé. Le DXF s'importe en fond de plan 2D.
 - Pas de travail collaboratif en temps réel.

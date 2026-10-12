@@ -268,6 +268,42 @@ export interface Section extends BaseElement {
   flip: boolean;
 }
 
+/** Fond de plan importé (DXF) : segments en mètres, relatifs à `pos`. */
+export interface CadImport extends BaseElement {
+  kind: 'cad';
+  levelId: Id;
+  name: string;
+  pos: Vec2;
+  rotation: number;
+  /** Segments à plat : x0, y0, x1, y1… */
+  lines: number[];
+  texts: { x: number; y: number; h: number; angle: number; text: string }[];
+  color: string;
+}
+
+export type LineStyle = 'thin' | 'medium' | 'thick' | 'dashed' | 'hidden' | 'axis';
+
+/** Ligne de détail 2D (visible uniquement dans la vue en plan de son niveau). */
+export interface DetailLine extends BaseElement {
+  kind: 'detail';
+  levelId: Id;
+  a: Vec2;
+  b: Vec2;
+  style: LineStyle;
+}
+
+export type RegionPattern = 'solid' | 'hatch' | 'crosshatch' | 'concrete' | 'insulation' | 'earth' | 'none';
+
+/** Zone remplie 2D (motif de remplissage). */
+export interface FilledRegion extends BaseElement {
+  kind: 'region';
+  levelId: Id;
+  points: Vec2[];
+  pattern: RegionPattern;
+  color: string;
+  border: boolean;
+}
+
 export interface Floor extends BaseElement {
   kind: 'floor';
   levelId: Id;
@@ -361,7 +397,10 @@ export type Element =
   | Railing
   | Component
   | TextNote
-  | Section;
+  | Section
+  | CadImport
+  | DetailLine
+  | FilledRegion;
 
 export type ElementKind = Element['kind'];
 
@@ -424,6 +463,9 @@ export const KIND_LABELS: Record<ElementKind, string> = {
   component: 'Composant',
   text: 'Texte',
   section: 'Coupe',
+  cad: 'Import CAO',
+  detail: 'Ligne de détail',
+  region: 'Zone remplie',
 };
 
 /** Éléments posés dans un mur hôte. */

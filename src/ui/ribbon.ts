@@ -2,14 +2,16 @@ import type { App, ToolName } from '../app';
 import { attachSelectedWalls, copySelection, detachSelectedWalls, floorFromWalls, paste, roofFromWalls } from '../commands';
 import { familyEditor } from './familyEditor';
 import { copyToLevelsDialog, selectAllInstances } from './contextMenu';
-import type { RoofShape } from '../model/types';
+import type { LineStyle, RegionPattern, RoofShape } from '../model/types';
+import { LINE_STYLES } from '../views/planView';
 import type { ViewHost } from '../views/viewHost';
 import { clear, h, perFrame } from './dom';
-import { lengthField, numberField, selectField } from './fields';
+import { colorField, lengthField, numberField, selectField } from './fields';
 import { ICONS } from './icons';
 import { helpDialog, levelsDialog, phasesDialog, projectInfoDialog, typesDialog, visibilityDialog } from './dialogs';
 
 export interface FileActions {
+  importCad(): void;
   printSheet(): void;
   exportSheet(): void;
   exportDXF(): void;
@@ -61,9 +63,21 @@ export const TOOL_LABELS: Record<ToolName, string> = {
   mirror: 'Modifier | Symétrie',
   array: 'Modifier | Réseau',
   demolish: 'Modifier | Démolir',
+  detail: 'Modifier | Placer Ligne de détail',
+  region: 'Modifier | Créer Zone remplie',
 };
 
-type TabId = 'architecture' | 'annotate' | 'modify' | 'view' | 'manage';
+export const REGION_PATTERNS: { value: RegionPattern; label: string }[] = [
+  { value: 'hatch', label: 'Hachures' },
+  { value: 'crosshatch', label: 'Hachures croisées' },
+  { value: 'concrete', label: 'Béton' },
+  { value: 'insulation', label: 'Isolant' },
+  { value: 'earth', label: 'Terre' },
+  { value: 'solid', label: 'Plein' },
+  { value: 'none', label: 'Aucun (contour)' },
+];
+
+type TabId = 'architecture' | 'insert' | 'annotate' | 'modify' | 'view' | 'manage';
 
 interface Btn {
   label: string;
@@ -169,6 +183,23 @@ export class Ribbon {
             ],
           },
         ];
+      case 'insert':
+        return [
+          {
+            title: 'Lier / importer',
+            buttons: [
+              { label: 'Importer CAO', icon: 'dxf', action: () => this.files.importCad(), title: 'Importer un plan DXF comme fond de plan (accrochable)' },
+              { label: 'Ouvrir projet', icon: 'open', action: () => this.files.open() },
+            ],
+          },
+          {
+            title: 'Bibliothèque',
+            buttons: [
+              { label: 'Familles', icon: 'component', action: () => familyEditor(app), shortcut: 'FA', title: 'Charger, créer et modifier des familles' },
+              { label: 'Composant', icon: 'component', tool: 'component', shortcut: 'CP' },
+            ],
+          },
+        ];
       case 'annotate':
         return [
           {
@@ -179,6 +210,13 @@ export class Ribbon {
             ],
           },
           { title: 'Texte', buttons: [{ label: 'Texte', icon: 'text', tool: 'text', shortcut: 'TX' }] },
+          {
+            title: 'Détail',
+            buttons: [
+              { label: 'Ligne de détail', icon: 'detailLine', tool: 'detail', shortcut: 'LD' },
+              { label: 'Zone remplie', icon: 'region', tool: 'region', shortcut: 'ZR' },
+            ],
+          },
           { title: 'Pièces', buttons: [{ label: 'Pièce', icon: 'room', tool: 'room', shortcut: 'PI' }] },
           { title: 'Référence', buttons: [{ label: 'Quadrillage', icon: 'grid', tool: 'grid', shortcut: 'QU' }] },
           { title: 'Mesure', buttons: [{ label: 'Mesurer', icon: 'measure', tool: 'measure', shortcut: 'ME' }] },
@@ -277,6 +315,7 @@ export class Ribbon {
     clear(this.tabsEl);
     const tabs: [TabId, string][] = [
       ['architecture', 'Architecture'],
+      ['insert', 'Insérer'],
       ['annotate', 'Annoter'],
       ['modify', 'Modifier'],
       ['view', 'Vue'],
@@ -406,6 +445,15 @@ export class Ribbon {
       case 'room':
         el.append(
           item('Mode', selectField(o.roomMode, [{ value: 'auto', label: 'Détection automatique' }, { value: 'sketch', label: 'Esquisse du contour' }], (v) => { app.setOptions({ roomMode: v }); app.setTool('room'); })),
+        );
+        break;
+      case 'detail':
+        el.append(item('Style de ligne', selectField(o.detailStyle, Object.entries(LINE_STYLES).map(([value, st]) => ({ value: value as LineStyle, label: st.label })), (v) => app.setOptions({ detailStyle: v }))));
+        break;
+      case 'region':
+        el.append(
+          item('Motif', selectField(o.regionPattern, REGION_PATTERNS, (v) => app.setOptions({ regionPattern: v }))),
+          item('Couleur', colorField(o.regionColor, (v) => app.setOptions({ regionColor: v }))),
         );
         break;
       case 'text':

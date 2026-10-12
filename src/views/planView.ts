@@ -1,4 +1,4 @@
-import type { App } from '../app';
+import type { App, ElevationDir } from '../app';
 import {
   add,
   bounds,
@@ -21,7 +21,7 @@ import {
   wallPieces,
 } from '../model/geometry';
 import { formatLength, levelOf, parseLength, type Project } from '../model/project';
-import type { Ceiling, Column, Component, Dimension, Door, Element, ElementKind, ElementOf, Floor, Grid, Id, Railing, Room, Roof, Section, Shaft, Stair, TextNote, Vec2, ViewSettings, Wall, WallLayer, WallOpening, Window } from '../model/types';
+import type { CadImport, DetailLine, FilledRegion, Ceiling, Column, Component, Dimension, Door, Element, ElementKind, ElementOf, Floor, Grid, Id, Railing, Room, Roof, Section, Shaft, Stair, TextNote, Vec2, ViewSettings, Wall, WallLayer, WallOpening, Window } from '../model/types';
 import { placer } from '../model/family';
 import type { PointerInfo, SnapKind, SnapResult, Tool } from '../tools/tool';
 import { createTool } from '../tools';
@@ -194,6 +194,12 @@ export class PlanView {
       if (lv !== undefined && lv !== this.levelId) continue;
       pts.push(...elementPoints(this.project, e));
     }
+    // Comme dans Revit, le zoom étendu englobe les repères d'élévation.
+    const walls = this.project.ofKind('wall');
+    if (walls.length) {
+      const b = bounds(walls.flatMap((w) => [w.a, w.b]));
+      pts.push(v(b.min.x - 4.5, b.min.y - 4.5), v(b.max.x + 4.5, b.max.y + 4.5));
+    }
     if (pts.length === 0) {
       this.cam = { cx: 5, cy: 4, scale: 50 };
     } else {
@@ -284,6 +290,13 @@ export class PlanView {
   };
 
   private onDblClick = (e: MouseEvent): void => {
+    const r = this.canvas.getBoundingClientRect();
+    const w = this.s2w(e.clientX - r.left, e.clientY - r.top);
+    const mk = this.elevationMarkers.find((m) => dist(m.pos, w) < this.px(16));
+    if (mk && this.app.tool === 'select') {
+      this.app.setView({ kind: 'elevation', dir: mk.dir });
+      return;
+    }
     this.tool.onDblClick?.(this.pointerInfo(e));
     this.requestDraw();
   };
@@ -344,9 +357,20 @@ export class PlanView {
         for (const p of e.points) consider(p, 'vertex');
       } else if ((e.kind === 'component' || e.kind === 'text') && e.levelId === this.levelId) {
         consider(e.pos, 'center');
-      } else if (e.kind === 'section') {
+      } else if (e.kind === 'section' || (e.kind === 'detail' && e.levelId === this.levelId)) {
         consider(e.a, 'end');
         consider(e.b, 'end');
+      } else if (e.kind === 'region' && e.levelId === this.levelId) {
+        for (const p of e.points) consider(p, 'vertex');
+      } else if (e.kind === 'cad' && e.levelId === this.levelId && this.shown('cad')) {
+        // Accrochage aux extrémités des segments du fond de plan.
+        const pl = cadPlacer(e);
+        const L = e.lines;
+        const lim = bestD;
+        for (let i = 0; i < L.length; i += 2) {
+          const q = pl(L[i], L[i + 1]);
+          if (Math.abs(q.x - raw.x) < lim && Math.abs(q.y - raw.y) < lim) consider(q, 'end');
+        }
       } else if (e.kind === 'column' && e.levelId === this.levelId) {
         consider(e.pos, 'center');
       } else if ((e.kind === 'stair' || e.kind === 'dimension') && e.levelId === this.levelId) {
@@ -393,6 +417,18 @@ export class PlanView {
       segs.push([o.aL, o.bL], [o.aR, o.bR], [w.a, w.b]);
     }
     for (const g of grids) segs.push([g.a, g.b]);
+    // Segments du fond de plan DXF proches du curseur (tracé « par-dessus » un plan existant).
+    for (const c of this.project.ofKind('cad', this.levelId)) {
+      if (!this.shown('cad')) break;
+      const pl = cadPlacer(c);
+      const L = c.lines;
+      for (let i = 0; i < L.length; i += 4) {
+        const a = pl(L[i], L[i + 1]);
+        const b = pl(L[i + 2], L[i + 3]);
+        if (Math.min(a.x, b.x) - tol > raw.x || Math.max(a.x, b.x) + tol < raw.x || Math.min(a.y, b.y) - tol > raw.y || Math.max(a.y, b.y) + tol < raw.y) continue;
+        segs.push([a, b]);
+      }
+    }
     for (const [a, b] of segs) {
       const pr = projectOnSegment(raw, a, b);
       if (pr.dist < nearD) {
@@ -420,7 +456,7 @@ export class PlanView {
 
   /** Éléments visibles dans cette vue, par ordre de priorité de sélection. */
   visibleElements(): Element[] {
-    const order: Element['kind'][] = ['door', 'window', 'opening', 'text', 'column', 'dimension', 'component', 'railing', 'stair', 'section', 'wall', 'grid', 'shaft', 'room', 'ceiling', 'floor', 'roof'];
+    const order: Element['kind'][] = ['door', 'window', 'opening', 'text', 'column', 'dimension', 'detail', 'component', 'railing', 'stair', 'section', 'wall', 'grid', 'shaft', 'region', 'room', 'ceiling', 'floor', 'roof', 'cad'];
     const settings = this.settings;
     const els = this.project.elements.filter((e) => {
       if (!this.shown(e.kind)) return false;
@@ -574,6 +610,8 @@ export class PlanView {
       }
     };
     if (below && this.settings.underlay !== false) layer('wall', 'SOUS-COUCHE', (w) => this.drawWallUnderlay(w), below.id);
+    layer('cad', 'IMPORT-CAO', (c) => this.drawCad(c));
+    layer('region', 'ZONES', (r) => this.drawRegion(r));
     layer('floor', 'SOLS', (f) => this.drawFloor(f));
     layer('ceiling', 'PLAFONDS', (c) => this.drawCeiling(c));
     layer('room', 'PIECES', (r) => this.drawRoomFill(r));
@@ -592,9 +630,12 @@ export class PlanView {
       for (const r of p.ofKind('room', lvl)) this.drawRoomTag(r);
     }
     layer('dimension', 'COTES', (d) => this.drawDimension(d));
+    layer('detail', 'LIGNES-DETAIL', (d) => this.drawDetail(d));
     layer('text', 'TEXTES', (t) => this.drawText(t));
     layer('grid', 'QUADRILLAGES', (g) => this.drawGrid(g), null);
     layer('section', 'COUPES', (sc) => this.drawSection(sc), null);
+    this.layer = 'ELEVATIONS';
+    this.drawElevationMarkers();
     this.layer = '0';
   }
 
@@ -751,7 +792,142 @@ export class PlanView {
       case 'section':
         this.drawSection(e, style.stroke);
         break;
+      case 'cad':
+        this.drawCad(e, style.stroke);
+        break;
+      case 'detail':
+        this.drawDetail(e, style.stroke);
+        break;
+      case 'region':
+        this.poly(e.points, { stroke: style.stroke, width: style.width, fill: style.fill });
+        break;
     }
+  }
+
+  /** Fond de plan DXF : tous les segments en un seul tracé (performances). */
+  drawCad(c: CadImport, color?: string): void {
+    const ctx = this.ctx;
+    const place = cadPlacer(c);
+    ctx.save();
+    ctx.strokeStyle = color ?? c.color;
+    ctx.lineWidth = color ? 1.4 : 0.7;
+    ctx.setLineDash(this.forcedDash ?? []);
+    ctx.beginPath();
+    const L = c.lines;
+    for (let i = 0; i < L.length; i += 4) {
+      const a = this.w2s(place(L[i], L[i + 1]));
+      const b = this.w2s(place(L[i + 2], L[i + 3]));
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+    }
+    ctx.stroke();
+    ctx.restore();
+    for (const t of c.texts) {
+      const px = t.h * this.cam.scale;
+      if (px < 5) continue;
+      this.text(place(t.x, t.y), t.text, { size: px, color: color ?? c.color, align: 'left', baseline: 'alphabetic', angle: -(t.angle + (c.rotation * Math.PI) / 180) });
+    }
+  }
+
+  /** Repères d'élévation (N, S, E, O) autour du bâtiment ; double-clic pour ouvrir la vue. */
+  elevationMarkers: { pos: Vec2; dir: ElevationDir }[] = [];
+
+  private drawElevationMarkers(): void {
+    this.elevationMarkers = [];
+    const walls = this.project.ofKind('wall');
+    if (!walls.length) return;
+    const b = bounds(walls.flatMap((w) => [w.a, w.b]));
+    const m = 3.5;
+    const cx = (b.min.x + b.max.x) / 2;
+    const cy = (b.min.y + b.max.y) / 2;
+    const markers: { pos: Vec2; dir: ElevationDir; look: Vec2 }[] = [
+      { pos: v(cx, b.min.y - m), dir: 'S', look: v(0, 1) },
+      { pos: v(cx, b.max.y + m), dir: 'N', look: v(0, -1) },
+      { pos: v(b.max.x + m, cy), dir: 'E', look: v(-1, 0) },
+      { pos: v(b.min.x - m, cy), dir: 'W', look: v(1, 0) },
+    ];
+    const r = 9 * this.paperK;
+    const ctx = this.ctx;
+    for (const mk of markers) {
+      const s = this.w2s(mk.pos);
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = '#fff';
+      ctx.fill();
+      ctx.strokeStyle = '#1d1d1f';
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+      ctx.restore();
+      // Flèche pleine dirigée vers la façade regardée.
+      const tip = add(mk.pos, mul(mk.look, this.px(r * 1.9)));
+      const side = perp(mk.look);
+      this.poly([add(mk.pos, mul(side, this.px(r))), tip, sub(mk.pos, mul(side, this.px(r)))], { fill: '#1d1d1f' });
+      this.text(mk.pos, { N: 'N', S: 'S', E: 'E', W: 'O' }[mk.dir], { size: 9 * this.paperK, bold: true, color: '#fff' });
+      this.elevationMarkers.push({ pos: mk.pos, dir: mk.dir });
+    }
+  }
+
+  drawDetail(d: DetailLine, color?: string): void {
+    const st = LINE_STYLES[d.style] ?? LINE_STYLES.thin;
+    this.line(d.a, d.b, color ?? st.color, color ? 2 : st.width, st.dash.map((x) => x * this.paperK));
+  }
+
+  drawRegion(r: FilledRegion): void {
+    if (r.points.length < 3) return;
+    const ctx = this.ctx;
+    if (r.pattern === 'solid') this.poly(r.points, { fill: r.color });
+    else if (r.pattern !== 'none' && !this.exporting) {
+      ctx.save();
+      this.path(r.points, true);
+      ctx.clip();
+      const pts = r.points.map((q) => this.w2s(q));
+      const x0 = Math.min(...pts.map((q) => q.x));
+      const x1 = Math.max(...pts.map((q) => q.x));
+      const y0 = Math.min(...pts.map((q) => q.y));
+      const y1 = Math.max(...pts.map((q) => q.y));
+      ctx.strokeStyle = r.color;
+      ctx.fillStyle = r.color;
+      ctx.lineWidth = 0.8;
+      const h = y1 - y0;
+      ctx.beginPath();
+      if (r.pattern === 'hatch' || r.pattern === 'crosshatch' || r.pattern === 'earth') {
+        const gap = r.pattern === 'earth' ? 10 : 7;
+        for (let x = x0 - h; x < x1; x += gap) {
+          ctx.moveTo(x, y1);
+          ctx.lineTo(x + h, y0);
+        }
+        if (r.pattern !== 'hatch') {
+          for (let x = x0; x < x1 + h; x += gap) {
+            ctx.moveTo(x, y1);
+            ctx.lineTo(x - h, y0);
+          }
+        }
+        ctx.stroke();
+      } else if (r.pattern === 'concrete') {
+        // Béton : points et petits triangles pseudo-aléatoires (stables).
+        let seed = 7;
+        const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+        const n = Math.min(4000, ((x1 - x0) * (y1 - y0)) / 60);
+        for (let i = 0; i < n; i++) {
+          const x = x0 + rnd() * (x1 - x0);
+          const y = y0 + rnd() * (y1 - y0);
+          ctx.fillRect(x, y, 1.2, 1.2);
+        }
+      } else if (r.pattern === 'insulation') {
+        ctx.beginPath();
+        for (let y = y0; y < y1; y += 8) {
+          for (let x = x0; x < x1; x += 8) {
+            ctx.moveTo(x, y + 8);
+            ctx.lineTo(x + 4, y);
+            ctx.lineTo(x + 8, y + 8);
+          }
+        }
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+    if (r.border) this.poly(r.points, { stroke: '#1d1d1f', width: 1 });
   }
 
   drawOpening(o: WallOpening, style?: DrawStyle): void {
@@ -1381,9 +1557,46 @@ export function elementPoints(p: Project, e: Element): Vec2[] {
     case 'text':
       return [e.pos];
     case 'section':
+    case 'detail':
       return [e.a, e.b];
+    case 'region':
+      return e.points;
+    case 'cad':
+      return cadCorners(e);
   }
 }
+
+export function cadPlacer(c: CadImport): (x: number, y: number) => Vec2 {
+  const a = (c.rotation * Math.PI) / 180;
+  const cs = Math.cos(a);
+  const sn = Math.sin(a);
+  return (x, y) => v(c.pos.x + x * cs - y * sn, c.pos.y + x * sn + y * cs);
+}
+
+export function cadCorners(c: CadImport): Vec2[] {
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (let i = 0; i < c.lines.length; i += 2) {
+    x0 = Math.min(x0, c.lines[i]);
+    x1 = Math.max(x1, c.lines[i]);
+    y0 = Math.min(y0, c.lines[i + 1]);
+    y1 = Math.max(y1, c.lines[i + 1]);
+  }
+  if (x0 === Infinity) return [c.pos];
+  const pl = cadPlacer(c);
+  return [pl(x0, y0), pl(x1, y0), pl(x1, y1), pl(x0, y1)];
+}
+
+export const LINE_STYLES: Record<string, { width: number; dash: number[]; color: string; label: string }> = {
+  thin: { width: 0.7, dash: [], color: '#1d1d1f', label: 'Fin' },
+  medium: { width: 1.3, dash: [], color: '#1d1d1f', label: 'Moyen' },
+  thick: { width: 2.4, dash: [], color: '#1d1d1f', label: 'Épais' },
+  dashed: { width: 1, dash: [8, 4], color: '#1d1d1f', label: 'Tirets' },
+  hidden: { width: 0.8, dash: [3, 3], color: '#6b7177', label: 'Caché' },
+  axis: { width: 0.8, dash: [14, 4, 3, 4], color: '#b03030', label: 'Axe' },
+};
 
 export function componentCorners(p: Project, c: Component): Vec2[] {
   const b = p.componentGeometry(c).bounds;
@@ -1452,7 +1665,18 @@ export function hitElement(p: Project, e: Element, pt: Vec2, tol: number): boole
     case 'text':
       return dist(pt, e.pos) < tol * 4 || (pt.x > e.pos.x && pt.x < e.pos.x + e.text.length * e.size * 0.06 && Math.abs(pt.y - e.pos.y - e.size * 0.04) < e.size * 0.07);
     case 'section':
+    case 'detail':
       return projectOnSegment(pt, e.a, e.b).dist < tol * 1.5;
+    case 'region':
+      return pointInPolygon(pt, e.points) || edgesNear(e.points, pt, tol);
+    case 'cad': {
+      const pl = cadPlacer(e);
+      const L = e.lines;
+      for (let i = 0; i < L.length; i += 4) {
+        if (projectOnSegment(pt, pl(L[i], L[i + 1]), pl(L[i + 2], L[i + 3])).dist < tol) return true;
+      }
+      return false;
+    }
   }
 }
 

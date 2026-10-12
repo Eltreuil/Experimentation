@@ -13,6 +13,7 @@ import {
   TextTool,
   WallDimensionTool,
   WallTool,
+  DetailLineTool,
 } from './draw';
 import { AlignTool, DemolishTool, MeasureTool, OffsetTool, SplitTool, TransformTool, TrimTool } from './modify';
 import { SelectTool } from './select';
@@ -68,6 +69,10 @@ export function createTool(name: ToolName, view: PlanView): Tool {
       return new SplitTool(view);
     case 'demolish':
       return new DemolishTool(view);
+    case 'detail':
+      return new DetailLineTool(view);
+    case 'region':
+      return new SketchTool(view, 'region');
     case 'move':
     case 'copy':
     case 'rotate':

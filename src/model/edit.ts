@@ -31,6 +31,7 @@ export function transformElement(e: Element, f: Transform, mirror = false): void
     case 'dimension':
     case 'grid':
     case 'section':
+    case 'detail':
       e.a = f(e.a);
       e.b = f(e.b);
       break;
@@ -40,6 +41,7 @@ export function transformElement(e: Element, f: Transform, mirror = false): void
     case 'shaft':
     case 'ceiling':
     case 'railing':
+    case 'region':
       e.points = e.points.map(f);
       if (e.kind === 'room' && e.seed) e.seed = f(e.seed);
       // Une symétrie inverse le sens du contour ; on le rétablit (sauf tracé ouvert).
@@ -48,6 +50,7 @@ export function transformElement(e: Element, f: Transform, mirror = false): void
     case 'column':
     case 'component':
     case 'text':
+    case 'cad':
       e.pos = f(e.pos);
       break;
     case 'door':
@@ -227,7 +230,7 @@ export function rotateElements(p: Project, ids: Iterable<Id>, center: Vec2, degr
     const e = p.get(id);
     if (!e || e.pinned) continue;
     transformElement(e, (q) => rotate(q, a, center));
-    if (e.kind === 'column' || e.kind === 'component' || e.kind === 'text') e.rotation = normDeg(e.rotation + degrees);
+    if (e.kind === 'column' || e.kind === 'component' || e.kind === 'text' || e.kind === 'cad') e.rotation = normDeg(e.rotation + degrees);
   }
 }
 

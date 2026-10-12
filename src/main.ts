@@ -35,6 +35,9 @@ document.getElementById('app')!.append(topbar, ribbonEl, h('div', { class: 'work
 
 const host = new ViewHost(app, viewEl);
 
+// Point d'accès pour l'automatisation (tests, scripts, extensions) depuis la console.
+(window as unknown as { openbim: unknown }).openbim = { app, host };
+
 // --- Fichiers ----------------------------------------------------------------
 /** Feuille A3 (SVG) de la vue en plan active, avec cartouche. */
 function currentSheet(): string | null {

@@ -73,6 +73,13 @@ export class ProjectBrowser {
     root.append(
       this.group('plans', 'Plans d’étage', [...levels].reverse().map((l) => this.node(l.name, { kind: 'plan', levelId: l.id }, 'plan')), addBtn),
       this.group('3d', 'Vues 3D', [this.node('{3D}', { kind: '3d' }, 'cube')]),
+      this.group(
+        'sections',
+        'Coupes',
+        p.ofKind('section').length
+          ? p.ofKind('section').map((sc) => this.node(sc.name, { kind: 'section', sectionId: sc.id }, 'section'))
+          : [h('div', { class: 'tree-sub' }, 'Outil Coupe (CE) dans un plan')],
+      ),
       this.group('elev', 'Élévations', [
         this.node('Nord', { kind: 'elevation', dir: 'N' }, 'elevation'),
         this.node('Sud', { kind: 'elevation', dir: 'S' }, 'elevation'),
@@ -85,6 +92,7 @@ export class ProjectBrowser {
         this.node('Fenêtres', { kind: 'schedule', category: 'window' }, 'schedule'),
         this.node('Pièces', { kind: 'schedule', category: 'room' }, 'schedule'),
         this.node('Sols', { kind: 'schedule', category: 'floor' }, 'schedule'),
+        this.node('Composants', { kind: 'schedule', category: 'component' }, 'schedule'),
       ]),
       this.group(
         'levels',

@@ -998,3 +998,27 @@ kbd {
     border-top: 1px solid var(--border);
   }
 }
+
+/* --- Visibilité / graphismes et saisie --------------------------------------- */
+.vg-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 4px 12px;
+}
+
+.vg-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+}
+
+.prompt-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted);
+}
+
+.btn.primary.block {
+  color: #fff;
+}

@@ -526,10 +526,11 @@ export class PlanView {
     const p = this.project;
     const lvl = this.levelId;
     const below = p.levelBelow(lvl);
-    const layer = <K extends ElementKind>(kind: K, name: string, fn: (e: ElementOf<K>) => void, levelId: Id | undefined = lvl) => {
+    // levelId null : éléments communs à tous les plans (quadrillages, coupes).
+    const layer = <K extends ElementKind>(kind: K, name: string, fn: (e: ElementOf<K>) => void, levelId: Id | null = lvl) => {
       if (!this.shown(kind)) return;
       this.layer = name;
-      for (const e of p.ofKind(kind, levelId)) fn(e);
+      for (const e of p.ofKind(kind, levelId ?? undefined)) fn(e);
     };
     if (below && this.settings.underlay !== false) layer('wall', 'SOUS-COUCHE', (w) => this.drawWallUnderlay(w), below.id);
     layer('floor', 'SOLS', (f) => this.drawFloor(f));
@@ -551,8 +552,8 @@ export class PlanView {
     }
     layer('dimension', 'COTES', (d) => this.drawDimension(d));
     layer('text', 'TEXTES', (t) => this.drawText(t));
-    layer('grid', 'QUADRILLAGES', (g) => this.drawGrid(g), undefined);
-    layer('section', 'COUPES', (sc) => this.drawSection(sc), undefined);
+    layer('grid', 'QUADRILLAGES', (g) => this.drawGrid(g), null);
+    layer('section', 'COUPES', (sc) => this.drawSection(sc), null);
     this.layer = '0';
   }
 

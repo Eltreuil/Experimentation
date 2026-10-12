@@ -14,6 +14,7 @@ export function emptyProject(name = 'Nouveau projet'): ProjectData {
       { id: 'wt-ext', name: 'Mur extérieur - Béton 20 + ITE 10', thickness: 0.3, color: '#d9cbb3', function: 'exterior' },
       { id: 'wt-int', name: 'Cloison - Plaque de plâtre 7', thickness: 0.07, color: '#f2f2f2', function: 'interior' },
       { id: 'wt-ref', name: 'Mur de refend - Brique 15', thickness: 0.15, color: '#c98f6b', function: 'interior' },
+      { id: 'wt-cw', name: 'Mur-rideau - Meneaux 150', thickness: 0.12, color: '#5f666d', function: 'exterior', family: 'curtain', curtainSpacing: 1.5, curtainRowSpacing: 1.2 },
     ],
     doorTypes: [
       { id: 'dt-83', name: 'Porte simple 83 x 204', width: 0.83, height: 2.04, color: '#8a5a3b' },
@@ -189,6 +190,25 @@ export function sampleProject(): ProjectData {
       { x: -0.5, y: D + 0.5 },
     ],
   });
+
+  // --- Mobilier et équipements
+  const comp = (family: string, x: number, y: number, rotation: number, levelId: string, w: number, d: number, h: number) =>
+    push({ id: newId('cp'), kind: 'component', levelId, family, pos: { x, y }, rotation, width: w, depth: d, height: h });
+  comp('sofa', 2.2, 1.0, 0, 'lvl-0', 2.2, 0.9, 0.85);
+  comp('table-dining', 2.2, 5.6, 0, 'lvl-0', 1.8, 0.9, 0.75);
+  comp('kitchen-run', 8.05, 7.5, 180, 'lvl-0', 2.4, 0.65, 0.9);
+  comp('fridge', 9.5, 5.3, 270, 'lvl-0', 0.6, 0.65, 1.85);
+  comp('bed-double', 2.5, 6.8, 180, 'lvl-1', 1.6, 2.1, 0.9);
+  comp('wardrobe', 4.5, 5.6, 270, 'lvl-1', 1.2, 0.6, 2.2);
+  comp('bed-single', 1.0, 2.0, 270, 'lvl-1', 0.9, 2.0, 0.9);
+  comp('desk', 3.5, 0.6, 0, 'lvl-1', 1.4, 0.7, 0.75);
+  comp('tree', -4, 4, 0, 'lvl-0', 4, 4, 6);
+
+  // --- Garde-corps de la trémie d'escalier à l'étage
+  push({ id: newId('gc'), kind: 'railing', levelId: 'lvl-1', points: [{ x: 8.8, y: 4.4 }, { x: 8.8, y: 0.2 }], height: 1.0, baseOffset: 0 });
+
+  // --- Coupe longitudinale
+  push({ id: newId('cp'), kind: 'section', name: 'Coupe 1', a: { x: -1.5, y: 2.6 }, b: { x: 11.5, y: 2.6 }, depth: 10, flip: true });
 
   // --- Quadrillages et cotes
   push({ id: newId('g'), kind: 'grid', a: { x: 0, y: -2 }, b: { x: 0, y: D + 2 }, label: '1' });

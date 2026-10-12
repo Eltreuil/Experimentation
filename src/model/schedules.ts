@@ -1,6 +1,7 @@
 import type { ScheduleCategory } from '../app';
 import { polygonArea, polygonPerimeter, wallLength } from './geometry';
 import { meshVolume, elementMeshes } from './mesh';
+import { componentFamily } from './components';
 import { formatLength, type Project } from './project';
 import type { Id } from './types';
 
@@ -164,6 +165,41 @@ export function buildSchedule(p: Project, category: ScheduleCategory): Schedule 
             values: { area, volume },
           };
         });
+      break;
+    }
+    case 'component': {
+      title = 'Nomenclature des composants';
+      columns = [
+        { key: 'category', label: 'Catégorie' },
+        { key: 'family', label: 'Famille' },
+        { key: 'level', label: 'Niveau' },
+        { key: 'size', label: 'Dimensions' },
+        { key: 'count', label: 'Nombre', align: 'right', total: (xs) => String(sum(xs)) },
+      ];
+      // Regroupement par famille et niveau, comme une nomenclature Revit non détaillée.
+      const groups = new Map<string, { id: Id; cells: Record<string, string>; values: Record<string, number> }>();
+      for (const c of p.ofKind('component')) {
+        const fam = componentFamily(c.family);
+        const key = `${fam.id}|${c.levelId}|${c.width}|${c.depth}`;
+        const g = groups.get(key);
+        if (g) {
+          g.values.count++;
+          g.cells.count = String(g.values.count);
+          continue;
+        }
+        groups.set(key, {
+          id: c.id,
+          cells: {
+            category: fam.category,
+            family: fam.name,
+            level: lvlName(c.levelId),
+            size: `${formatLength(c.width, u)} × ${formatLength(c.depth, u)} ${u}`,
+            count: '1',
+          },
+          values: { count: 1 },
+        });
+      }
+      rows = [...groups.values()].sort((a, b) => a.cells.category.localeCompare(b.cells.category) || a.cells.family.localeCompare(b.cells.family));
       break;
     }
   }

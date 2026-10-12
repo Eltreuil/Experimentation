@@ -2,7 +2,9 @@
 // fenêtres, dalles, toitures, poteaux, escaliers et espaces.
 import { polygonArea, wallDir } from '../model/geometry';
 import type { Project } from '../model/project';
-import { elementMeshes } from '../model/mesh';
+import { componentFamily } from '../model/components';
+import { elementMeshes, floorHoles } from '../model/mesh';
+import { isHosted } from '../model/project';
 import type { Element, Id, RoofShape, Vec2 } from '../model/types';
 
 const ROOF_TYPES: Record<RoofShape, string> = { flat: '.FLAT_ROOF.', mono: '.SHED_ROOF.', gable: '.GABLE_ROOF.', hip: '.HIP_ROOF.' };
@@ -154,6 +156,28 @@ export function exportIFC(p: Project, opts: IfcOptions = {}): string {
 
   const wallIfc = new Map<Id, { id: number; pl: number }>();
 
+  /** Représentation B-rep facettée à partir du maillage de l'élément (géométries non extrudables). */
+  const brepOf = (e: Element, elevation: number): number | null => {
+    const mesh = elementMeshes(p, e);
+    if (!mesh) return null;
+    const faces: number[] = [];
+    for (const s of mesh.solids) {
+      for (let i = 0; i < s.positions.length; i += 9) {
+        const pts: number[] = [];
+        for (let k = 0; k < 3; k++) {
+          const [x, y, z] = s.positions.slice(i + k * 3, i + k * 3 + 3);
+          pts.push(w.point(x, -z, y - elevation));
+        }
+        const loop = w.add(`IFCPOLYLOOP(${list(pts)})`);
+        const bound = w.add(`IFCFACEOUTERBOUND(${ref(loop)},.T.)`);
+        faces.push(w.add(`IFCFACE((${ref(bound)}))`));
+      }
+    }
+    if (!faces.length) return null;
+    const shell = w.add(`IFCCLOSEDSHELL(${list(faces)})`);
+    return shape([w.add(`IFCFACETEDBREP(${ref(shell)})`)], 'Brep');
+  };
+
   const emit = (e: Element) => {
     switch (e.kind) {
       case 'wall': {
@@ -161,9 +185,17 @@ export function exportIFC(p: Project, opts: IfcOptions = {}): string {
         const t = p.wallType(e.typeId);
         const o = p.outline(e);
         const pl = localPl(e.levelId);
-        const solid = extrusion([o.aL, o.bL, o.bR, o.aR], e.baseOffset, e.height);
+        const st = storeyOf.get(e.levelId)!;
+        if (t.family === 'curtain') {
+          const rep = brepOf(e, st.elevation);
+          const id = w.add(`IFCCURTAINWALL('${guid()}',$,${str(t.name)},$,${str(t.name)},${ref(pl)},${rep ? ref(rep) : '$'},${str(e.mark)},.NOTDEFINED.)`);
+          contain(e.levelId, id);
+          break;
+        }
+        // Mur attaché au toit : géométrie exacte (B-rep) ; sinon extrusion de l'emprise.
+        const rep = e.attachRoofId ? brepOf(e, st.elevation) : shape([extrusion([o.aL, o.bL, o.bR, o.aR], e.baseOffset, e.height)]);
         const id = w.add(
-          `IFCWALL('${guid()}',$,${str(t.name)},$,${str(t.name)},${ref(pl)},${ref(shape([solid]))},${str(e.mark)},.STANDARD.)`,
+          `IFCWALL('${guid()}',$,${str(t.name)},$,${str(t.name)},${ref(pl)},${rep ? ref(rep) : '$'},${str(e.mark)},.STANDARD.)`,
         );
         wallIfc.set(e.id, { id, pl });
         contain(e.levelId, id);
@@ -172,7 +204,16 @@ export function exportIFC(p: Project, opts: IfcOptions = {}): string {
       case 'floor': {
         if (!storeyOf.has(e.levelId)) return;
         const pl = localPl(e.levelId);
-        const solid = extrusion(e.points, e.offset - e.thickness, e.thickness);
+        const top = storeyOf.get(e.levelId)!.elevation + e.offset;
+        const holes = floorHoles(p, e.points, top);
+        let solid: number;
+        if (holes.length) {
+          // Trémies : profil avec évidements.
+          const profile = w.add(`IFCARBITRARYPROFILEDEFWITHVOIDS(.AREA.,$,${ref(polyline(e.points))},${list(holes.map((hl) => polyline(hl)))})`);
+          solid = w.add(`IFCEXTRUDEDAREASOLID(${ref(profile)},${ref(w.placement3d(0, 0, e.offset - e.thickness))},${ref(w.dir(0, 0, 1))},${num(e.thickness)})`);
+        } else {
+          solid = extrusion(e.points, e.offset - e.thickness, e.thickness);
+        }
         const id = w.add(`IFCSLAB('${guid()}',$,'Dalle',$,$,${ref(pl)},${ref(shape([solid]))},${str(e.mark)},.FLOOR.)`);
         contain(e.levelId, id);
         break;
@@ -183,23 +224,10 @@ export function exportIFC(p: Project, opts: IfcOptions = {}): string {
         if (!st || !mesh) return;
         const pl = localPl(e.levelId);
         // Géométrie exacte des pans : représentation B-rep facettée.
-        const faces: number[] = [];
-        for (const s of mesh.solids) {
-          for (let i = 0; i < s.positions.length; i += 9) {
-            const pts: number[] = [];
-            for (let k = 0; k < 3; k++) {
-              const [x, y, z] = s.positions.slice(i + k * 3, i + k * 3 + 3);
-              pts.push(w.point(x, -z, y - st.elevation));
-            }
-            const loop = w.add(`IFCPOLYLOOP(${list(pts)})`);
-            const bound = w.add(`IFCFACEOUTERBOUND(${ref(loop)},.T.)`);
-            faces.push(w.add(`IFCFACE((${ref(bound)}))`));
-          }
-        }
-        const shell = w.add(`IFCCLOSEDSHELL(${list(faces)})`);
-        const brep = w.add(`IFCFACETEDBREP(${ref(shell)})`);
+        const rep = brepOf(e, st.elevation);
+        if (!rep) return;
         const id = w.add(
-          `IFCROOF('${guid()}',$,${str(`Toiture ${e.slope}°`)},$,$,${ref(pl)},${ref(shape([brep], 'Brep'))},${str(e.mark)},${ROOF_TYPES[e.shape ?? 'mono']})`,
+          `IFCROOF('${guid()}',$,${str(`Toiture ${e.slope}°`)},$,$,${ref(pl)},${ref(rep)},${str(e.mark)},${ROOF_TYPES[e.shape ?? 'mono']})`,
         );
         contain(e.levelId, id);
         break;
@@ -259,13 +287,57 @@ export function exportIFC(p: Project, opts: IfcOptions = {}): string {
         contain(e.levelId, id);
         break;
       }
+      case 'ceiling': {
+        if (!storeyOf.has(e.levelId)) return;
+        const solid = extrusion(e.points, e.height, e.thickness);
+        const id = w.add(`IFCCOVERING('${guid()}',$,'Faux-plafond',$,$,${ref(localPl(e.levelId))},${ref(shape([solid]))},${str(e.mark)},.CEILING.)`);
+        contain(e.levelId, id);
+        break;
+      }
+      case 'railing': {
+        const st = storeyOf.get(e.levelId);
+        if (!st) return;
+        const rep = brepOf(e, st.elevation);
+        const id = w.add(`IFCRAILING('${guid()}',$,'Garde-corps',$,$,${ref(localPl(e.levelId))},${rep ? ref(rep) : '$'},${str(e.mark)},.GUARDRAIL.)`);
+        contain(e.levelId, id);
+        break;
+      }
+      case 'component': {
+        const st = storeyOf.get(e.levelId);
+        if (!st) return;
+        const fam = componentFamily(e.family);
+        const rep = brepOf(e, st.elevation);
+        const pl = localPl(e.levelId);
+        const r = rep ? ref(rep) : '$';
+        const sanitary: Record<string, string> = { wc: 'TOILETPAN', sink: 'WASHHANDBASIN', bathtub: 'BATH', shower: 'SHOWER' };
+        const furniture: Record<string, string> = { 'bed-double': 'BED', 'bed-single': 'BED', sofa: 'SOFA', armchair: 'CHAIR', 'table-dining': 'TABLE', 'table-round': 'TABLE', desk: 'DESK', wardrobe: 'SHELF' };
+        let id: number;
+        if (sanitary[fam.id]) id = w.add(`IFCSANITARYTERMINAL('${guid()}',$,${str(fam.name)},$,$,${ref(pl)},${r},${str(e.mark)},.${sanitary[fam.id]}.)`);
+        else if (fam.category === 'Mobilier' || fam.category === 'Cuisine') id = w.add(`IFCFURNITURE('${guid()}',$,${str(fam.name)},$,$,${ref(pl)},${r},${str(e.mark)},.${furniture[fam.id] ?? 'NOTDEFINED'}.)`);
+        else id = w.add(`IFCFURNISHINGELEMENT('${guid()}',$,${str(fam.name)},$,$,${ref(pl)},${r},${str(e.mark)})`);
+        contain(e.levelId, id);
+        break;
+      }
       default:
         break;
     }
   };
 
   const elements = p.elements;
-  for (const e of elements) if (e.kind !== 'door' && e.kind !== 'window') emit(e);
+  for (const e of elements) if (!isHosted(e)) emit(e);
+
+  // --- Ouvertures sans menuiserie : simple réservation dans le mur.
+  for (const e of elements) {
+    if (e.kind !== 'opening') continue;
+    const host = p.get<'wall'>(e.hostId);
+    const hostIfc = host && wallIfc.get(host.id);
+    if (!host || !hostIfc) continue;
+    const dir = wallDir(host);
+    const pl = w.add(`IFCLOCALPLACEMENT(${ref(hostIfc.pl)},${ref(w.placement3d(host.a.x + dir.x * e.offset, host.a.y + dir.y * e.offset, host.baseOffset + e.sill, dir))})`);
+    const solid = box(e.width, p.thickness(host) + 0.1, 0, e.height);
+    const opening = w.add(`IFCOPENINGELEMENT('${guid()}',$,${str('Ouverture')},$,$,${ref(pl)},${ref(shape([solid]))},${str(e.mark)},.OPENING.)`);
+    w.add(`IFCRELVOIDSELEMENT('${guid()}',$,$,$,${ref(hostIfc.id)},${ref(opening)})`);
+  }
 
   // --- Portes et fenêtres : réservation dans le mur + élément de remplissage.
   for (const e of elements) {

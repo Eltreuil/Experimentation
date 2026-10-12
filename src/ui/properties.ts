@@ -2,6 +2,7 @@ import type { App } from '../app';
 import { flipSelectedDoors } from '../commands';
 import { polygonArea, polygonPerimeter, stairRisers, wallLength, add, mul, wallDir, dist } from '../model/geometry';
 import { formatLength, levelOf } from '../model/project';
+import { COMPONENT_FAMILIES, componentFamily } from '../model/components';
 import { KIND_LABELS, type Element, type ElementKind, type Id } from '../model/types';
 import { clear, h, perFrame } from './dom';
 import { ROOF_SHAPES } from './ribbon';
@@ -139,7 +140,34 @@ export class PropertiesPanel {
         const c = this.section(root, 'Contraintes');
         c.append(row('Niveau', levelSelect(e.levelId, (id) => (e.levelId = id))));
         c.append(row('Décalage inférieur', L(e.baseOffset, (m) => (e.baseOffset = m))));
-        c.append(row('Hauteur non contrainte', L(e.height, (m) => (e.height = m), 0.1)));
+        const above = p.sortedLevels().filter((l) => l.elevation > (p.level(e.levelId)?.elevation ?? 0));
+        c.append(
+          row(
+            'Contrainte supérieure',
+            selectField(
+              e.topLevelId ?? '',
+              [{ value: '', label: 'Non contrainte' }, ...above.map((l) => ({ value: l.id, label: `Jusqu’au niveau : ${l.name}` }))],
+              (val) => this.edit('Contrainte supérieure', () => (e.topLevelId = val || null)),
+            ),
+          ),
+        );
+        if (e.topLevelId) {
+          c.append(row('Décalage supérieur', L(e.topOffset ?? 0, (m) => (e.topOffset = m))));
+          c.append(row('Hauteur', readonlyField(formatLength(e.height, u, true))));
+        } else {
+          c.append(row('Hauteur non contrainte', L(e.height, (m) => (e.height = m), 0.1)));
+        }
+        const roofs = p.ofKind('roof');
+        c.append(
+          row(
+            'Haut attaché au toit',
+            selectField(
+              e.attachRoofId ?? '',
+              [{ value: '', label: 'Non' }, ...roofs.map((r) => ({ value: r.id, label: `Toit ${p.level(r.levelId)?.name ?? ''} (${r.slope}°)` }))],
+              (val) => this.edit('Attacher haut', () => (e.attachRoofId = val || null)),
+            ),
+          ),
+        );
         const d = this.section(root, 'Cotes');
         d.append(
           row(
@@ -296,6 +324,91 @@ export class PropertiesPanel {
         d.append(row('Nom', textField(e.label, (val) => this.edit('Nom du quadrillage', () => (e.label = val)))));
         break;
       }
+      case 'opening': {
+        const host = p.get<'wall'>(e.hostId);
+        this.header(root, 'Ouverture', `${formatLength(e.width, u)} × ${formatLength(e.height, u)} ${u}`);
+        const c = this.section(root, 'Contraintes');
+        c.append(row('Niveau', readonlyField(host ? p.level(host.levelId)?.name ?? '' : '')));
+        c.append(row('Distance depuis l’origine du mur', L(e.offset - e.width / 2, (m) => (e.offset = m + e.width / 2), 0)));
+        c.append(row('Allège', L(e.sill, (m) => (e.sill = m), 0)));
+        const d = this.section(root, 'Cotes');
+        d.append(row('Largeur', L(e.width, (m) => (e.width = m), 0.05)));
+        d.append(row('Hauteur', L(e.height, (m) => (e.height = m), 0.05)));
+        common(this.section(root, 'Données d’identification'));
+        break;
+      }
+      case 'shaft': {
+        this.header(root, 'Trémie', `${Math.abs(polygonArea(e.points)).toFixed(2)} m²`);
+        const c = this.section(root, 'Contraintes');
+        c.append(row('Niveau de base', levelSelect(e.levelId, (id) => (e.levelId = id))));
+        c.append(row('Hauteur', L(e.height, (m) => (e.height = m), 0)));
+        c.append(h('div', { class: 'prop-empty' }, 'Perce les sols dont le dessus est compris entre la base et la hauteur.'));
+        common(this.section(root, 'Données d’identification'));
+        break;
+      }
+      case 'ceiling': {
+        this.header(root, 'Faux-plafond', `${Math.abs(polygonArea(e.points)).toFixed(2)} m²`);
+        const c = this.section(root, 'Contraintes');
+        c.append(row('Niveau', levelSelect(e.levelId, (id) => (e.levelId = id))));
+        c.append(row('Hauteur sous plafond', L(e.height, (m) => (e.height = m), 0.5)));
+        c.append(row('Épaisseur', L(e.thickness, (m) => (e.thickness = m), 0.005)));
+        common(this.section(root, 'Données d’identification'));
+        break;
+      }
+      case 'railing': {
+        let length = 0;
+        for (let i = 0; i < e.points.length - 1; i++) length += dist(e.points[i], e.points[i + 1]);
+        this.header(root, 'Garde-corps', formatLength(length, u, true));
+        const c = this.section(root, 'Contraintes');
+        c.append(row('Niveau', levelSelect(e.levelId, (id) => (e.levelId = id))));
+        c.append(row('Décalage de la base', L(e.baseOffset, (m) => (e.baseOffset = m))));
+        c.append(row('Hauteur', L(e.height, (m) => (e.height = m), 0.3)));
+        common(this.section(root, 'Données d’identification'));
+        break;
+      }
+      case 'component': {
+        const fam = componentFamily(e.family);
+        this.header(root, 'Composant', fam.name);
+        root.append(
+          h('div', { class: 'type-selector' },
+            selectField(e.family, COMPONENT_FAMILIES.map((f) => ({ value: f.id, label: `${f.category} — ${f.name}` })), (val) =>
+              this.edit('Changer de famille', () => {
+                const nf = componentFamily(val);
+                e.family = nf.id;
+                e.width = nf.width;
+                e.depth = nf.depth;
+                e.height = nf.height;
+              }),
+            ),
+          ),
+        );
+        const c = this.section(root, 'Contraintes');
+        c.append(row('Niveau', levelSelect(e.levelId, (id) => (e.levelId = id))));
+        c.append(row('Rotation', numberField(e.rotation, (val) => this.edit('Rotation', () => (e.rotation = val)), { step: 15, suffix: '°' })));
+        const d = this.section(root, 'Cotes');
+        d.append(row('Largeur', L(e.width, (m) => (e.width = m), 0.05)));
+        d.append(row('Profondeur', L(e.depth, (m) => (e.depth = m), 0.05)));
+        d.append(row('Hauteur', L(e.height, (m) => (e.height = m), 0.05)));
+        common(this.section(root, 'Données d’identification'));
+        break;
+      }
+      case 'text': {
+        this.header(root, 'Texte', e.text.slice(0, 40));
+        const c = this.section(root, 'Texte');
+        c.append(row('Contenu', textField(e.text, (val) => this.edit('Texte', () => (e.text = val || e.text)))));
+        c.append(row('Taille (mm papier)', numberField(e.size, (val) => this.edit('Taille', () => (e.size = val)), { min: 1, max: 30, step: 0.5, suffix: 'mm' })));
+        c.append(row('Rotation', numberField(e.rotation, (val) => this.edit('Rotation', () => (e.rotation = val)), { step: 15, suffix: '°' })));
+        break;
+      }
+      case 'section': {
+        this.header(root, 'Coupe', e.name);
+        const c = this.section(root, 'Données d’identification');
+        c.append(row('Nom', textField(e.name, (val) => this.edit('Nom de la coupe', () => (e.name = val || e.name)))));
+        c.append(row('Profondeur de vue', L(e.depth, (m) => (e.depth = m), 0.5)));
+        c.append(row('Inverser la visée', checkField(e.flip, (val) => this.edit('Inverser la coupe', () => (e.flip = val)))));
+        root.append(h('button', { class: 'btn primary block', onclick: () => this.app.setView({ kind: 'section', sectionId: e.id }) }, 'Ouvrir la vue en coupe'));
+        break;
+      }
     }
     root.append(h('button', { class: 'btn danger block', onclick: () => this.app.deleteSelection() }, 'Supprimer'));
   }
@@ -320,6 +433,11 @@ export class PropertiesPanel {
       s.append(row('Épaisseur', L(t.thickness, (m) => (t.thickness = m), 0.01)));
       s.append(row('Fonction', selectField(t.function, [{ value: 'exterior', label: 'Extérieur' }, { value: 'interior', label: 'Intérieur' }], (v) => this.edit('Fonction', () => (t.function = v)))));
       s.append(row('Couleur', colorField(t.color, (v) => this.edit('Couleur', () => (t.color = v)))));
+      s.append(row('Famille', selectField(t.family ?? 'basic', [{ value: 'basic', label: 'Mur de base' }, { value: 'curtain', label: 'Mur-rideau' }], (v) => this.edit('Famille de mur', () => (t.family = v)))));
+      if (t.family === 'curtain') {
+        s.append(row('Espacement des meneaux', L(t.curtainSpacing ?? 1.5, (m) => (t.curtainSpacing = m), 0.3)));
+        s.append(row('Espacement des traverses', L(t.curtainRowSpacing ?? 1.5, (m) => (t.curtainRowSpacing = m), 0.3)));
+      }
     } else if (kind === 'door') {
       const t = p.doorType(typeId);
       s.append(row('Nom du type', textField(t.name, (v) => this.edit('Renommer le type', () => (t.name = v || t.name)))));

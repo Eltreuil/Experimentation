@@ -37,6 +37,8 @@ export class View3D {
   /** Plans de coupe : horizontal (3D), avant et arrière (coupes). */
   private sectionNear = new THREE.Plane(new THREE.Vector3(1, 0, 0), 1e6);
   private sectionFar = new THREE.Plane(new THREE.Vector3(-1, 0, 0), 1e6);
+  private sectionLeft = new THREE.Plane(new THREE.Vector3(0, 0, 1), 1e6);
+  private sectionRight = new THREE.Plane(new THREE.Vector3(0, 0, -1), 1e6);
   private planes: THREE.Plane[];
   private pocheMaterial: THREE.MeshBasicMaterial;
 
@@ -48,7 +50,7 @@ export class View3D {
     this.elevation = opts.elevation ?? null;
     this.sectionId = opts.sectionId ?? null;
     const elevation = this.elevation ?? (this.sectionId ? 'S' : null);
-    this.planes = [this.clipPlane, this.sectionNear, this.sectionFar];
+    this.planes = [this.clipPlane, this.sectionNear, this.sectionFar, this.sectionLeft, this.sectionRight];
     // Poché : les faces arrière visibles à travers un plan de coupe sont remplies en sombre.
     this.pocheMaterial = new THREE.MeshBasicMaterial({ color: 0x2f3337, side: THREE.BackSide, clippingPlanes: this.planes });
     this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
@@ -256,6 +258,12 @@ export class View3D {
     const c = new THREE.Vector3((sc.a.x + sc.b.x) / 2, 0, -(sc.a.y + sc.b.y) / 2);
     this.sectionNear.set(L.clone(), -c.dot(L));
     this.sectionFar.set(L.clone().negate(), c.dot(L) + sc.depth);
+    // Zone cadrée : limitée à la longueur de la ligne de coupe.
+    const D = new THREE.Vector3(sc.b.x - sc.a.x, 0, -(sc.b.y - sc.a.y)).normalize();
+    const a = new THREE.Vector3(sc.a.x, 0, -sc.a.y);
+    const b = new THREE.Vector3(sc.b.x, 0, -sc.b.y);
+    this.sectionLeft.set(D.clone(), -a.dot(D));
+    this.sectionRight.set(D.clone().negate(), b.dot(D));
   }
 
   private rebuild(): void {
@@ -446,7 +454,8 @@ export class View3D {
       const aspect = Math.max(1, r.width) / Math.max(1, r.height);
       const sc = this.section;
       const horiz = sc ? Math.hypot(sc.b.x - sc.a.x, sc.b.y - sc.a.y) : Math.abs(look.x) > 0.5 ? size.z : size.x;
-      const halfH = Math.max(size.y, horiz / aspect) * 0.65 + 0.5;
+      // Marge latérale pour les repères et étiquettes de niveaux.
+      const halfH = Math.max(size.y * 0.65, (horiz / 2 + 5) / aspect) + 0.5;
       this.camera.top = halfH;
       this.camera.bottom = -halfH;
       this.camera.left = -halfH * aspect;

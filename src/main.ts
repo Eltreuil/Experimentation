@@ -202,3 +202,8 @@ window.addEventListener('keydown', (e) => {
     }
   }
 });
+
+// Application installable et utilisable hors ligne (hors application de bureau).
+if ('serviceWorker' in navigator && location.protocol.startsWith('http') && import.meta.env.PROD) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+}

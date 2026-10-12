@@ -1,0 +1,34 @@
+{
+  "name": "openbim-studio-desktop",
+  "productName": "OpenBIM Studio",
+  "version": "1.0.0",
+  "description": "Modeleur BIM open source inspiré de Revit",
+  "license": "MIT",
+  "author": "OpenBIM Studio contributors",
+  "homepage": "https://github.com/Eltreuil/Experimentation",
+  "main": "main.cjs",
+  "scripts": {
+    "prepare-web": "node copy-web.cjs",
+    "start": "npm run prepare-web && electron .",
+    "dist": "npm run prepare-web && electron-builder --publish never",
+    "dist:linux": "npm run prepare-web && electron-builder --linux --publish never",
+    "dist:win": "npm run prepare-web && electron-builder --win --publish never",
+    "dist:mac": "npm run prepare-web && electron-builder --mac --publish never"
+  },
+  "devDependencies": {
+    "electron": "33.2.1",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "org.openbim.studio",
+    "productName": "OpenBIM Studio",
+    "artifactName": "OpenBIM-Studio-${version}-${os}-${arch}.${ext}",
+    "directories": { "output": "release" },
+    "files": ["main.cjs", "icon.png", "web/**/*"],
+    "fileAssociations": [{ "ext": "obim", "name": "Projet OpenBIM Studio" }],
+    "linux": { "target": ["AppImage", "tar.gz"], "category": "Graphics", "icon": "icon.png" },
+    "win": { "target": ["nsis", "portable"], "icon": "icon.png" },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true },
+    "mac": { "target": ["dmg", "zip"], "category": "public.app-category.graphics-design", "icon": "icon.png" }
+  }
+}

@@ -81,3 +81,20 @@ describe('familles paramétriques', () => {
     expect('width' in n.elements.old).toBe(false);
   });
 });
+
+describe('signature géométrique (reconstruction 3D incrémentale)', () => {
+  it('ne change que pour l’élément modifié et ses dépendances', async () => {
+    const { elementSignature } = await import('../src/model/signature');
+    const p = new Project(sampleProject());
+    const sigs = () => new Map(p.elements.map((e) => [e.id, elementSignature(p, e)]));
+    const before = sigs();
+    const wall = p.ofKind('wall', 'lvl-0').find((w) => w.a.x === 0 && w.a.y === 0)!;
+    p.transact('h', () => (wall.height = 3.2));
+    const after = sigs();
+    const changed = [...after].filter(([id, s]) => before.get(id) !== s).map(([id]) => p.get(id)!.kind);
+    // Le mur, et ses portes/fenêtres hébergées ; pas le reste du modèle.
+    expect(changed).toContain('wall');
+    expect(changed.length).toBeLessThan(5);
+    expect(changed.every((k) => ['wall', 'door', 'window', 'opening'].includes(k))).toBe(true);
+  });
+});

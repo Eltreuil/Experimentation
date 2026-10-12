@@ -26,6 +26,8 @@ export function newId(prefix = 'e'): Id {
 }
 
 const MAX_HISTORY = 200;
+/** Pas de la grille d'index spatial des murs (m). */
+const GRID = 2;
 
 interface HistoryEntry {
   label: string;
@@ -43,6 +45,10 @@ export class Project {
   private listeners = new Set<() => void>();
   private outlineCache: Map<Id, WallOutline> | null = null;
   private familyCache = new Map<string, FamilyResult>();
+  private kindCache = new Map<string, Element[]>();
+  private hostIndex: Map<Id, Hosted[]> | null = null;
+  private wallGrid: Map<Id, Map<string, Wall[]>> | null = null;
+  private mutating = 0;
   dirty = false;
 
   constructor(data: ProjectData) {
@@ -55,8 +61,7 @@ export class Project {
   }
 
   emit(): void {
-    this.outlineCache = null;
-    this.familyCache.clear();
+    this.invalidate();
     for (const fn of this.listeners) fn();
   }
 
@@ -72,7 +77,14 @@ export class Project {
   /** Exécute une modification annulable. */
   transact<T>(label: string, fn: (d: ProjectData) => T): T {
     const snapshot = JSON.stringify(this.data);
-    const result = fn(this.data);
+    // Pendant une modification, les index en cache sont ignorés (données en cours de changement).
+    this.mutating++;
+    let result: T;
+    try {
+      result = fn(this.data);
+    } finally {
+      this.mutating--;
+    }
     this.syncConstraints();
     this.pushHistory(label, snapshot);
     this.emit();
@@ -153,9 +165,17 @@ export class Project {
   }
 
   ofKind<K extends ElementKind>(kind: K, levelId?: Id): ElementOf<K>[] {
-    return this.elements.filter(
-      (e): e is ElementOf<K> => e.kind === kind && (levelId === undefined || levelOf(this, e) === levelId),
-    );
+    const compute = () =>
+      this.elements.filter((e): e is ElementOf<K> => e.kind === kind && (levelId === undefined || levelOf(this, e) === levelId));
+    if (this.mutating) return compute();
+    const key = `${kind}|${levelId ?? '*'}`;
+    let list = this.kindCache.get(key);
+    if (!list) {
+      list = compute();
+      this.kindCache.set(key, list);
+    }
+    // Copie : l'appelant peut trier ou modifier la liste.
+    return list.slice() as ElementOf<K>[];
   }
 
   level(id: Id): Level | undefined {
@@ -219,23 +239,82 @@ export class Project {
   }
 
   outline(w: Wall): WallOutline {
+    const thick = wallTypeThickness(this.data.wallTypes);
     // Les éléments temporaires (aperçus, id commençant par « _ ») ne sont pas mis en cache.
-    if (w.id.startsWith('_')) return wallOutline(w, this.ofKind('wall', w.levelId), wallTypeThickness(this.data.wallTypes));
+    if (w.id.startsWith('_') || this.mutating) return wallOutline(w, this.ofKind('wall', w.levelId), thick);
     if (!this.outlineCache) this.outlineCache = new Map();
     let o = this.outlineCache.get(w.id);
     if (!o) {
-      o = wallOutline(w, this.ofKind('wall', w.levelId), wallTypeThickness(this.data.wallTypes));
+      o = wallOutline(w, this.wallsNear(w), thick);
       this.outlineCache.set(w.id, o);
     }
     return o;
   }
 
+  /**
+   * Murs du même niveau proches des extrémités d'un mur (index spatial par
+   * grille) : seuls candidats possibles pour les raccords.
+   */
+  private wallsNear(w: Wall): Wall[] {
+    if (!this.wallGrid) this.wallGrid = new Map();
+    let grid = this.wallGrid.get(w.levelId);
+    if (!grid) {
+      grid = new Map();
+      for (const x of this.ofKind('wall', w.levelId)) {
+        const pad = this.thickness(x);
+        const x0 = Math.floor((Math.min(x.a.x, x.b.x) - pad) / GRID);
+        const x1 = Math.floor((Math.max(x.a.x, x.b.x) + pad) / GRID);
+        const y0 = Math.floor((Math.min(x.a.y, x.b.y) - pad) / GRID);
+        const y1 = Math.floor((Math.max(x.a.y, x.b.y) + pad) / GRID);
+        // Les très longs murs restent dans une liste commune pour borner la taille de l'index.
+        if ((x1 - x0 + 1) * (y1 - y0 + 1) > 400) {
+          const l = grid.get('*') ?? [];
+          l.push(x);
+          grid.set('*', l);
+          continue;
+        }
+        for (let i = x0; i <= x1; i++) {
+          for (let j = y0; j <= y1; j++) {
+            const k = `${i},${j}`;
+            const l = grid.get(k);
+            if (l) l.push(x);
+            else grid.set(k, [x]);
+          }
+        }
+      }
+      this.wallGrid.set(w.levelId, grid);
+    }
+    const out = new Set<Wall>(grid.get('*') ?? []);
+    for (const pt of [w.a, w.b]) {
+      const i = Math.floor(pt.x / GRID);
+      const j = Math.floor(pt.y / GRID);
+      for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) for (const x of grid.get(`${i + di},${j + dj}`) ?? []) out.add(x);
+    }
+    out.add(w);
+    return [...out];
+  }
+
+  /** Vide les index et caches (appelé à chaque notification de changement). */
   invalidate(): void {
     this.outlineCache = null;
+    this.familyCache.clear();
+    this.kindCache.clear();
+    this.hostIndex = null;
+    this.wallGrid = null;
   }
 
   hosted(wallId: Id): Hosted[] {
-    return this.elements.filter((e): e is Hosted => isHosted(e) && e.hostId === wallId);
+    if (this.mutating) return this.elements.filter((e): e is Hosted => isHosted(e) && e.hostId === wallId);
+    if (!this.hostIndex) {
+      this.hostIndex = new Map();
+      for (const e of this.elements) {
+        if (!isHosted(e)) continue;
+        const l = this.hostIndex.get(e.hostId);
+        if (l) l.push(e);
+        else this.hostIndex.set(e.hostId, [e]);
+      }
+    }
+    return (this.hostIndex.get(wallId) ?? []).slice();
   }
 
   /** Largeur, hauteur et allège d'un élément hébergé. */

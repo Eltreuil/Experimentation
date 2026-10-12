@@ -81,7 +81,10 @@ export function promptDialog(title: string, label: string, value: string): Promi
       ),
     );
     const close = modal(title, body, { onClose: () => finish(null) });
-    setTimeout(() => input.focus(), 0);
+    setTimeout(() => {
+      input.focus();
+      input.select();
+    }, 0);
   });
 }
 

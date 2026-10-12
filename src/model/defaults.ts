@@ -121,7 +121,7 @@ export function sampleProject(): ProjectData {
     ],
   });
   push({ id: newId('st'), kind: 'stair', levelId: 'lvl-0', a: { x: 9.3, y: 0.5 }, b: { x: 9.3, y: 4.1 }, width: 0.9, height: 3.0, maxRiser: 0.18, mark: 'E1' });
-  push({ id: newId('c'), kind: 'column', levelId: 'lvl-0', pos: { x: 3, y: 6.2 }, width: 0.25, depth: 0.25, height: 3.0, rotation: 0, shape: 'round', mark: 'C1' });
+  push({ id: newId('c'), kind: 'column', levelId: 'lvl-0', pos: { x: 4.6, y: 3.4 }, width: 0.25, depth: 0.25, height: 3.0, rotation: 0, shape: 'round', mark: 'C1' });
 
   // --- Niveau 1
   const [s1, , n1, w1] = loop('lvl-1', footprint, 'wt-ext', 2.7);

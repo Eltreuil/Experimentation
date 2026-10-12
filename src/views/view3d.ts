@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { App, ElevationDir } from '../app';
 import { elementMeshes } from '../model/mesh';
+import { elementSignature } from '../model/signature';
 import type { Id, Section } from '../model/types';
 import { sectionLook } from './planView';
 
@@ -22,6 +23,11 @@ export class View3D {
   private dirtyModel = true;
   private disposers: (() => void)[] = [];
   private meshesById = new Map<Id, THREE.Mesh[]>();
+  /** Objets 3D par élément, avec la signature géométrique ayant servi à les produire. */
+  private entries = new Map<Id, { sig: string; meshes: THREE.Mesh[] }>();
+  private renderKey = '';
+  /** Nombre d'éléments regénérés lors de la dernière mise à jour (diagnostic). */
+  lastRebuildCount = 0;
   private materials = new Map<string, THREE.Material>();
   private edgeMaterial = new THREE.LineBasicMaterial({ color: 0x2b2b2b, transparent: true, opacity: 0.55 });
   private clipPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 1000);
@@ -236,6 +242,7 @@ export class View3D {
     });
     this.annotations.clear();
     this.meshesById.clear();
+    this.entries.clear();
   }
 
   /** Clé de la vue pour les réglages de visibilité. */
@@ -266,21 +273,64 @@ export class View3D {
     this.sectionRight.set(D.clone().negate(), b.dot(D));
   }
 
+  /** Retire et libère les objets 3D d'un élément. */
+  private dropEntry(id: Id): void {
+    const entry = this.entries.get(id);
+    if (!entry) return;
+    for (const m of entry.meshes) {
+      m.removeFromParent();
+      m.geometry.dispose();
+      m.traverse((o) => {
+        if (o instanceof THREE.LineSegments) o.geometry.dispose();
+      });
+      const mat = m.material as THREE.Material;
+      if (mat !== m.userData.baseMaterial) mat.dispose();
+    }
+    this.entries.delete(id);
+    this.meshesById.delete(id);
+  }
+
+  /**
+   * Reconstruction incrémentale : seuls les éléments dont la signature
+   * géométrique a changé sont regénérés.
+   */
   private rebuild(): void {
-    this.clearModel();
     const p = this.app.project;
     this.updateSectionPlanes();
     const hidden = new Set(p.data.viewSettings?.[this.viewKey]?.hidden ?? []);
     const cutting = !!this.sectionId || this.clipHeight !== null;
+    const renderKey = `${this.style}|${this.edges}|${cutting}`;
+    if (renderKey !== this.renderKey) {
+      for (const id of [...this.entries.keys()]) this.dropEntry(id);
+      this.renderKey = renderKey;
+    }
+    // Annotations (repères de niveaux) : toujours reconstruites, elles sont légères.
+    this.annotations.traverse((o) => {
+      if (o instanceof THREE.Sprite) {
+        o.material.map?.dispose();
+        o.material.dispose();
+      }
+      if (o instanceof THREE.Line) o.geometry.dispose();
+    });
+    this.annotations.clear();
+
+    const alive = new Set<Id>();
+    let rebuilt = 0;
     for (const e of p.elements) {
       if (hidden.has(e.kind)) continue;
+      alive.add(e.id);
+      const sig = elementSignature(p, e);
+      if (this.entries.get(e.id)?.sig === sig) continue;
+      this.dropEntry(e.id);
+      rebuilt++;
       const em = elementMeshes(p, e);
-      if (!em) continue;
       const list: THREE.Mesh[] = [];
-      for (const s of em.solids) {
+      for (const s of em?.solids ?? []) {
+        if (!s.positions.length) continue;
         const geo = new THREE.BufferGeometry();
         geo.setAttribute('position', new THREE.Float32BufferAttribute(s.positions, 3));
         geo.computeVertexNormals();
+        geo.computeBoundingSphere();
         const mat = this.material(s.color, s.material);
         const mesh = new THREE.Mesh(geo, mat);
         mesh.castShadow = s.material !== 'glass';
@@ -300,12 +350,15 @@ export class View3D {
           mesh.add(edges);
         }
       }
+      this.entries.set(e.id, { sig, meshes: list });
       this.meshesById.set(e.id, list);
     }
+    for (const id of [...this.entries.keys()]) if (!alive.has(id)) this.dropEntry(id);
+    this.lastRebuildCount = rebuilt;
     this.edgeMaterial.clippingPlanes = this.planes;
     if (this.elevation || this.sectionId) this.buildLevelMarkers();
     this.updateSelection();
-    this.updateShadowCamera();
+    if (rebuilt) this.updateShadowCamera();
   }
 
   private buildLevelMarkers(): void {

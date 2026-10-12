@@ -1198,3 +1198,16 @@ kbd {
     display: none;
   }
 }
+
+.fe-head select.prop-input,
+.fe-card-head select.prop-input {
+  width: auto;
+  flex: 0 0 auto;
+  min-width: 140px;
+}
+
+.fe-head > input.prop-input,
+.fe-card-head > input.prop-input {
+  flex: 1 1 auto;
+  min-width: 120px;
+}

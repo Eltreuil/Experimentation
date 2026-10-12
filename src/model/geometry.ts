@@ -229,6 +229,35 @@ export interface WallPiece {
   capEnd: boolean;
 }
 
+/** Emprise du tronçon de mur entre les abscisses s0 et s1 (raccords conservés aux extrémités). */
+export function wallQuad(wall: Wall, outline: WallOutline, thickness: number, s0: number, s1: number): [Vec2, Vec2, Vec2, Vec2] {
+  const L = wallLength(wall);
+  const dir = wallDir(wall);
+  const n = perp(dir);
+  const h = thickness / 2;
+  const leftAt = (s: number): Vec2 =>
+    s <= EPS ? outline.aL : s >= L - EPS ? outline.bL : add(add(wall.a, mul(dir, s)), mul(n, h));
+  const rightAt = (s: number): Vec2 =>
+    s <= EPS ? outline.aR : s >= L - EPS ? outline.bR : add(add(wall.a, mul(dir, s)), mul(n, -h));
+  return [leftAt(s0), leftAt(s1), rightAt(s1), rightAt(s0)];
+}
+
+/** Abscisses (le long de l'axe a→b) où un segment coupe l'axe du mur. */
+export function segmentCrossings(wall: Wall, segs: [Vec2, Vec2][]): number[] {
+  const out: number[] = [];
+  const d = sub(wall.b, wall.a);
+  const L = len(d);
+  for (const [p, q] of segs) {
+    const e = sub(q, p);
+    const den = cross(d, e);
+    if (Math.abs(den) < 1e-12) continue;
+    const t = cross(sub(p, wall.a), e) / den;
+    const u = cross(sub(p, wall.a), d) / den;
+    if (t > 1e-6 && t < 1 - 1e-6 && u >= -1e-9 && u <= 1 + 1e-9) out.push(t * L);
+  }
+  return out.sort((x, y) => x - y);
+}
+
 /**
  * Découpe un mur en volumes pleins autour de ses ouvertures (portes/fenêtres).
  * Les hauteurs sont relatives à la base du mur.
@@ -240,15 +269,8 @@ export function wallPieces(
   openings: OpeningSpan[],
 ): WallPiece[] {
   const L = wallLength(wall);
-  const dir = wallDir(wall);
-  const n = perp(dir);
-  const h = thickness / 2;
   const H = wall.height;
-  const leftAt = (s: number): Vec2 =>
-    s <= EPS ? outline.aL : s >= L - EPS ? outline.bL : add(add(wall.a, mul(dir, s)), mul(n, h));
-  const rightAt = (s: number): Vec2 =>
-    s <= EPS ? outline.aR : s >= L - EPS ? outline.bR : add(add(wall.a, mul(dir, s)), mul(n, -h));
-  const quad = (s0: number, s1: number): [Vec2, Vec2, Vec2, Vec2] => [leftAt(s0), leftAt(s1), rightAt(s1), rightAt(s0)];
+  const quad = (s0: number, s1: number) => wallQuad(wall, outline, thickness, s0, s1);
 
   const ops = openings
     .map((o) => ({ ...o, start: Math.max(0, o.start), end: Math.min(L, o.end), top: Math.min(H, o.top) }))

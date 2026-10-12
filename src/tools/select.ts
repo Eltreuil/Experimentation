@@ -52,6 +52,7 @@ export class SelectTool implements Tool {
       case 'stair':
       case 'dimension':
       case 'grid':
+      case 'section':
         return [
           { id, key: 'a', point: e.a },
           { id, key: 'b', point: e.b },
@@ -59,6 +60,9 @@ export class SelectTool implements Tool {
       case 'floor':
       case 'room':
       case 'roof':
+      case 'shaft':
+      case 'ceiling':
+      case 'railing':
         return e.points.map((p, i) => ({ id, key: i, point: p }));
       default:
         return [];
@@ -228,7 +232,8 @@ function applyMove(e: Element, orig: Element, delta: Vec2, selection: Set<Id>, h
     case 'wall':
     case 'stair':
     case 'dimension':
-    case 'grid': {
+    case 'grid':
+    case 'section': {
       const o = orig as typeof e;
       e.a = add(o.a, delta);
       e.b = add(o.b, delta);
@@ -236,16 +241,22 @@ function applyMove(e: Element, orig: Element, delta: Vec2, selection: Set<Id>, h
     }
     case 'floor':
     case 'room':
-    case 'roof': {
+    case 'roof':
+    case 'shaft':
+    case 'ceiling':
+    case 'railing': {
       const o = orig as typeof e;
       e.points = o.points.map((p) => add(p, delta));
       break;
     }
     case 'column':
+    case 'component':
+    case 'text':
       e.pos = add((orig as typeof e).pos, delta);
       break;
     case 'door':
-    case 'window': {
+    case 'window':
+    case 'opening': {
       // Une ouverture suit son mur hôte ; déplacée seule, elle coulisse le long du mur.
       if (selection.has(e.hostId)) break;
       const dir = hostDir(e.hostId);

@@ -20,7 +20,8 @@ import {
   wallPieces,
 } from '../model/geometry';
 import { formatLength, levelOf, type Project } from '../model/project';
-import type { Column, Dimension, Door, Element, Floor, Grid, Id, Room, Roof, Stair, Vec2, Wall, Window } from '../model/types';
+import type { Ceiling, Column, Component, Dimension, Door, Element, ElementKind, ElementOf, Floor, Grid, Id, Railing, Room, Roof, Section, Shaft, Stair, TextNote, Vec2, ViewSettings, Wall, WallOpening, Window } from '../model/types';
+import { componentFamily } from '../model/components';
 import type { PointerInfo, SnapKind, SnapResult, Tool } from '../tools/tool';
 import { createTool } from '../tools';
 
@@ -54,6 +55,10 @@ export class PlanView {
   readonly ctx: CanvasRenderingContext2D;
   cam = { cx: 5, cy: 4, scale: 50 };
   hoverId: Id | null = null;
+  /** Calque courant (export DXF/SVG). */
+  layer = '0';
+  /** Vrai pendant un export vectoriel (tailles de texte non bornées). */
+  exporting = false;
   cursor: Vec2 | null = null;
   lastSnap: SnapResult | null = null;
   tool: Tool;
@@ -305,8 +310,13 @@ export class PlanView {
     }
     for (const e of this.project.elements) {
       if (exclude?.has(e.id)) continue;
-      if ((e.kind === 'floor' || e.kind === 'room' || e.kind === 'roof') && levelIds.has(e.levelId)) {
+      if ((e.kind === 'floor' || e.kind === 'room' || e.kind === 'roof' || e.kind === 'shaft' || e.kind === 'ceiling' || e.kind === 'railing') && levelIds.has(e.levelId)) {
         for (const p of e.points) consider(p, 'vertex');
+      } else if ((e.kind === 'component' || e.kind === 'text') && e.levelId === this.levelId) {
+        consider(e.pos, 'center');
+      } else if (e.kind === 'section') {
+        consider(e.a, 'end');
+        consider(e.b, 'end');
       } else if (e.kind === 'column' && e.levelId === this.levelId) {
         consider(e.pos, 'center');
       } else if ((e.kind === 'stair' || e.kind === 'dimension') && e.levelId === this.levelId) {
@@ -380,8 +390,9 @@ export class PlanView {
 
   /** Éléments visibles dans cette vue, par ordre de priorité de sélection. */
   visibleElements(): Element[] {
-    const order: Element['kind'][] = ['door', 'window', 'column', 'dimension', 'stair', 'wall', 'grid', 'room', 'floor', 'roof'];
+    const order: Element['kind'][] = ['door', 'window', 'opening', 'text', 'column', 'dimension', 'component', 'railing', 'stair', 'section', 'wall', 'grid', 'shaft', 'room', 'ceiling', 'floor', 'roof'];
     const els = this.project.elements.filter((e) => {
+      if (!this.shown(e.kind)) return false;
       const lv = levelOf(this.project, e);
       return lv === undefined || lv === this.levelId;
     });
@@ -434,25 +445,9 @@ export class PlanView {
     ctx.fillRect(0, 0, this.width, this.height);
     if (!clean) this.drawBackgroundGrid();
 
+    this.drawModel();
+
     const p = this.project;
-    const below = p.levelBelow(this.levelId);
-    if (below) {
-      for (const w of p.ofKind('wall', below.id)) this.drawWallUnderlay(w);
-    }
-
-    const lvl = this.levelId;
-    for (const f of p.ofKind('floor', lvl)) this.drawFloor(f);
-    for (const r of p.ofKind('room', lvl)) this.drawRoomFill(r);
-    for (const s of p.ofKind('stair', lvl)) this.drawStair(s);
-    for (const w of p.ofKind('wall', lvl)) this.drawWall(w);
-    for (const d of p.ofKind('door', lvl)) this.drawDoor(d);
-    for (const w of p.ofKind('window', lvl)) this.drawWindow(w);
-    for (const c of p.ofKind('column', lvl)) this.drawColumn(c);
-    for (const r of p.ofKind('roof', lvl)) this.drawRoof(r);
-    for (const r of p.ofKind('room', lvl)) this.drawRoomTag(r);
-    for (const d of p.ofKind('dimension', lvl)) this.drawDimension(d);
-    for (const g of p.ofKind('grid')) this.drawGrid(g);
-
     if (!clean) {
       const here = (e: Element) => {
         const lv = levelOf(p, e);
@@ -469,6 +464,55 @@ export class PlanView {
       this.tool.draw?.(ctx);
       if (this.cursor && this.lastSnap && this.app.tool !== 'select') this.drawSnapMarker(this.lastSnap);
     }
+  }
+
+  /** Réglages d'affichage de la vue (catégories masquées, échelle, sous-couche). */
+  get settings(): ViewSettings {
+    return this.project.data.viewSettings?.[`plan:${this.levelId}`] ?? {};
+  }
+
+  shown(kind: ElementKind): boolean {
+    return !this.settings.hidden?.includes(kind);
+  }
+
+  /** Dénominateur d'échelle de la vue (100 pour 1/100). */
+  get viewScale(): number {
+    return this.settings.scale ?? 100;
+  }
+
+  /** Dessine tout le contenu du modèle (utilisé aussi pour l'export vectoriel). */
+  drawModel(): void {
+    const p = this.project;
+    const lvl = this.levelId;
+    const below = p.levelBelow(lvl);
+    const layer = <K extends ElementKind>(kind: K, name: string, fn: (e: ElementOf<K>) => void, levelId: Id | undefined = lvl) => {
+      if (!this.shown(kind)) return;
+      this.layer = name;
+      for (const e of p.ofKind(kind, levelId)) fn(e);
+    };
+    if (below && this.settings.underlay !== false) layer('wall', 'SOUS-COUCHE', (w) => this.drawWallUnderlay(w), below.id);
+    layer('floor', 'SOLS', (f) => this.drawFloor(f));
+    layer('ceiling', 'PLAFONDS', (c) => this.drawCeiling(c));
+    layer('room', 'PIECES', (r) => this.drawRoomFill(r));
+    layer('shaft', 'TREMIES', (sh) => this.drawShaft(sh));
+    layer('component', 'MOBILIER', (c) => this.drawComponent(c));
+    layer('stair', 'ESCALIERS', (st) => this.drawStair(st));
+    layer('railing', 'GARDE-CORPS', (r) => this.drawRailing(r));
+    layer('wall', 'MURS', (w) => this.drawWall(w));
+    layer('door', 'PORTES', (d) => this.drawDoor(d));
+    layer('window', 'FENETRES', (w) => this.drawWindow(w));
+    layer('opening', 'OUVERTURES', (o) => this.drawOpening(o));
+    layer('column', 'POTEAUX', (c) => this.drawColumn(c));
+    layer('roof', 'TOITS', (r) => this.drawRoof(r));
+    if (this.shown('room')) {
+      this.layer = 'ETIQUETTES';
+      for (const r of p.ofKind('room', lvl)) this.drawRoomTag(r);
+    }
+    layer('dimension', 'COTES', (d) => this.drawDimension(d));
+    layer('text', 'TEXTES', (t) => this.drawText(t));
+    layer('grid', 'QUADRILLAGES', (g) => this.drawGrid(g), undefined);
+    layer('section', 'COUPES', (sc) => this.drawSection(sc), undefined);
+    this.layer = '0';
   }
 
   private drawBackgroundGrid(): void {
@@ -560,9 +604,13 @@ export class PlanView {
     ctx.restore();
   }
 
-  /** Taille de texte d'annotation : 2,5 mm à l'échelle 1/100, bornée à l'écran. */
+  /**
+   * Taille de texte d'annotation en pixels. `base` est la hauteur en mètres à
+   * l'échelle 1/100 (0,25 ≈ 2,5 mm sur papier) ; elle suit l'échelle de la vue.
+   */
   annotationSize(base = 0.22): number {
-    return Math.max(9, Math.min(16, base * this.cam.scale));
+    if (this.exporting) return base * (this.viewScale / 100) * this.cam.scale;
+    return Math.max(8, Math.min(30, base * (this.viewScale / 100) * this.cam.scale));
   }
 
   // Éléments -----------------------------------------------------------------
@@ -599,7 +647,132 @@ export class PlanView {
       case 'grid':
         this.drawGrid(e, style.stroke);
         break;
+      case 'opening':
+        this.drawOpening(e, style);
+        break;
+      case 'shaft':
+        this.drawShaft(e, style);
+        break;
+      case 'ceiling':
+        this.poly(e.points, { stroke: style.stroke, width: style.width, fill: style.fill });
+        break;
+      case 'railing':
+        this.drawRailing(e, style);
+        break;
+      case 'component':
+        this.drawComponent(e, style);
+        break;
+      case 'text':
+        this.drawText(e, style.stroke);
+        break;
+      case 'section':
+        this.drawSection(e, style.stroke);
+        break;
     }
+  }
+
+  drawOpening(o: WallOpening, style?: DrawStyle): void {
+    const fr = this.project.openingFrame(o);
+    if (!fr) return;
+    const t = this.project.thickness(fr.wall);
+    const n = perp(fr.dir);
+    const color = style?.stroke ?? COLORS.line;
+    const j0 = add(fr.center, mul(fr.dir, -o.width / 2));
+    const j1 = add(fr.center, mul(fr.dir, o.width / 2));
+    const quad = [add(j0, mul(n, t / 2)), add(j1, mul(n, t / 2)), add(j1, mul(n, -t / 2)), add(j0, mul(n, -t / 2))];
+    const cut = o.sill <= CUT_HEIGHT && o.sill + o.height > CUT_HEIGHT;
+    if (!cut || style) this.poly(quad, { stroke: color, width: style?.width ?? 1, fill: style?.fill }, cut ? [] : [4, 3]);
+    if (cut) {
+      this.line(quad[0], quad[3], color, style?.width ?? 1);
+      this.line(quad[1], quad[2], color, style?.width ?? 1);
+      this.line(quad[0], quad[2], color, 0.6, [4, 3]);
+    }
+  }
+
+  drawShaft(sh: Shaft, style?: DrawStyle): void {
+    const color = style?.stroke ?? COLORS.line;
+    this.poly(sh.points, { stroke: color, width: style?.width ?? 1.2, fill: style?.fill ?? 'rgba(255,255,255,0.9)' });
+    if (sh.points.length === 4) {
+      this.line(sh.points[0], sh.points[2], color, 0.8);
+      this.line(sh.points[1], sh.points[3], color, 0.8);
+    } else if (!style) {
+      this.text(polygonCentroid(sh.points), 'TRÉMIE', { size: this.annotationSize(0.16), color });
+    }
+  }
+
+  drawCeiling(c: Ceiling): void {
+    this.poly(c.points, { stroke: '#b0b6bd', width: 0.8 }, [2, 3]);
+  }
+
+  drawRailing(r: Railing, style?: DrawStyle): void {
+    const color = style?.stroke ?? COLORS.line;
+    const w = style?.width ?? 1;
+    for (let i = 0; i < r.points.length - 1; i++) {
+      const a = r.points[i];
+      const b = r.points[i + 1];
+      if (dist(a, b) < 1e-6) continue;
+      const n = mul(perp(norm(sub(b, a))), 0.025);
+      this.line(add(a, n), add(b, n), color, w);
+      this.line(sub(a, n), sub(b, n), color, w);
+    }
+  }
+
+  drawComponent(c: Component, style?: DrawStyle): void {
+    const fam = componentFamily(c.family);
+    const a = (c.rotation * Math.PI) / 180;
+    const place = (x: number, y: number): Vec2 => {
+      const lx = x * c.width;
+      const ly = y * c.depth;
+      return v(c.pos.x + lx * Math.cos(a) - ly * Math.sin(a), c.pos.y + lx * Math.sin(a) + ly * Math.cos(a));
+    };
+    const color = style?.stroke ?? '#3d4248';
+    const w = style?.width ?? 0.9;
+    for (const pr of fam.plan) {
+      if (pr.t === 'line') {
+        this.line(place(pr.x0, pr.y0), place(pr.x1, pr.y1), color, w * 0.8);
+      } else if (pr.t === 'rect') {
+        this.poly([place(pr.x0, pr.y0), place(pr.x1, pr.y0), place(pr.x1, pr.y1), place(pr.x0, pr.y1)], { stroke: color, width: w, fill: style?.fill ?? 'rgba(255,255,255,0.85)' });
+      } else {
+        const pts: Vec2[] = [];
+        for (let i = 0; i < 28; i++) {
+          const t = (i / 28) * Math.PI * 2;
+          pts.push(place(pr.cx + pr.r * Math.cos(t), pr.cy + pr.r * Math.sin(t) * (c.width / c.depth)));
+        }
+        this.poly(pts, { stroke: color, width: w, fill: style?.fill ?? 'rgba(255,255,255,0.85)' });
+      }
+    }
+  }
+
+  drawText(t: TextNote, color: string = COLORS.annotation): void {
+    // Taille papier (mm) × échelle → hauteur réelle (m).
+    const size = this.annotationSize((t.size / 1000) * 100);
+    this.text(t.pos, t.text, { size, color, align: 'left', angle: (-t.rotation * Math.PI) / 180, baseline: 'alphabetic' });
+  }
+
+  drawSection(sc: Section, color: string = '#1d1d1f'): void {
+    if (dist(sc.a, sc.b) < 1e-6) return;
+    const dir = norm(sub(sc.b, sc.a));
+    const look = sectionLook(sc);
+    this.line(sc.a, sc.b, color, 1.4, [16, 4, 3, 4]);
+    const size = this.px(9);
+    for (const end of [sc.a, sc.b]) {
+      // Tête de coupe : cercle + flèche de visée.
+      const s = this.w2s(end);
+      const ctx = this.ctx;
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, 9, 0, Math.PI * 2);
+      ctx.fillStyle = '#fff';
+      ctx.fill();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.4;
+      ctx.stroke();
+      ctx.restore();
+      const tip = add(end, mul(look, size * 2.2));
+      this.poly([add(end, mul(perp(look), size)), tip, sub(end, mul(perp(look), size))], { fill: color });
+      this.text(end, sc.name, { size: 10, bold: true, color });
+    }
+    void dir;
   }
 
   private cutSpans(w: Wall) {
@@ -609,6 +782,10 @@ export class PlanView {
   drawWall(w: Wall, style?: DrawStyle): void {
     const p = this.project;
     const t = p.wallType(w.typeId);
+    if (t.family === 'curtain') {
+      this.drawCurtainWall(w, style);
+      return;
+    }
     const outline = p.outline(w);
     const pieces = wallPieces(w, outline, t.thickness, this.cutSpans(w)).filter((pc) => pc.bottom <= CUT_HEIGHT && pc.top > CUT_HEIGHT);
     const ctx = this.ctx;
@@ -637,6 +814,27 @@ export class PlanView {
       ctx.restore();
     }
     if (style && pieces.length === 0) this.line(w.a, w.b, stroke, lw);
+  }
+
+  private drawCurtainWall(w: Wall, style?: DrawStyle): void {
+    const p = this.project;
+    const t = p.wallType(w.typeId);
+    const o = p.outline(w);
+    const color = style?.stroke ?? COLORS.line;
+    const lw = style?.width ?? 1;
+    const dir = norm(sub(w.b, w.a));
+    const n = perp(dir);
+    const L = dist(w.a, w.b);
+    // Vitrage (trait central) et meneaux.
+    this.poly([o.aL, o.bL, o.bR, o.aR], { stroke: style ? color : '#9aa0a6', width: style ? lw : 0.6, fill: style?.fill });
+    this.line(w.a, w.b, color, lw);
+    const cols = Math.max(1, Math.round(L / Math.max(0.3, t.curtainSpacing ?? 1.5)));
+    for (let i = 0; i <= cols; i++) {
+      const c = add(w.a, mul(dir, (L * i) / cols));
+      const h = t.thickness / 2;
+      const m = 0.025;
+      this.poly([add(add(c, mul(dir, -m)), mul(n, -h)), add(add(c, mul(dir, m)), mul(n, -h)), add(add(c, mul(dir, m)), mul(n, h)), add(add(c, mul(dir, -m)), mul(n, h))], { fill: color });
+    }
   }
 
   private hatchWall(quad: Vec2[], dense: boolean): void {
@@ -993,7 +1191,41 @@ export function elementPoints(p: Project, e: Element): Vec2[] {
       return e.points;
     case 'column':
       return columnCorners(e);
+    case 'opening': {
+      const fr = p.openingFrame(e);
+      return fr ? [add(fr.center, mul(fr.dir, -fr.width / 2)), add(fr.center, mul(fr.dir, fr.width / 2))] : [];
+    }
+    case 'shaft':
+    case 'ceiling':
+    case 'railing':
+      return e.points;
+    case 'component':
+      return componentCorners(e);
+    case 'text':
+      return [e.pos];
+    case 'section':
+      return [e.a, e.b];
   }
+}
+
+export function componentCorners(c: Component): Vec2[] {
+  const a = (c.rotation * Math.PI) / 180;
+  return [
+    [-0.5, -0.5],
+    [0.5, -0.5],
+    [0.5, 0.5],
+    [-0.5, 0.5],
+  ].map(([x, y]) => {
+    const lx = x * c.width;
+    const ly = y * c.depth;
+    return v(c.pos.x + lx * Math.cos(a) - ly * Math.sin(a), c.pos.y + lx * Math.sin(a) + ly * Math.cos(a));
+  });
+}
+
+/** Direction de visée d'une coupe (à droite de a→b, ou à gauche si inversée). */
+export function sectionLook(sc: Section): Vec2 {
+  const d = norm(sub(sc.b, sc.a));
+  return sc.flip ? perp(d) : mul(perp(d), -1);
 }
 
 export function hitElement(p: Project, e: Element, pt: Vec2, tol: number): boolean {
@@ -1033,6 +1265,25 @@ export function hitElement(p: Project, e: Element, pt: Vec2, tol: number): boole
       return pointInPolygon(pt, e.points);
     case 'roof':
       return edgesNear(e.points, pt, tol * 1.5);
+    case 'opening': {
+      const fr = p.openingFrame(e);
+      if (!fr) return false;
+      const local = sub(pt, fr.center);
+      return Math.abs(dot(local, fr.dir)) < fr.width / 2 + tol && Math.abs(dot(local, perp(fr.dir))) < p.thickness(fr.wall) / 2 + tol;
+    }
+    case 'shaft':
+      return pointInPolygon(pt, e.points) || edgesNear(e.points, pt, tol);
+    case 'ceiling':
+      return edgesNear(e.points, pt, tol * 1.5);
+    case 'railing':
+      for (let i = 0; i < e.points.length - 1; i++) if (projectOnSegment(pt, e.points[i], e.points[i + 1]).dist < tol * 1.5) return true;
+      return false;
+    case 'component':
+      return pointInPolygon(pt, componentCorners(e));
+    case 'text':
+      return dist(pt, e.pos) < tol * 4 || (pt.x > e.pos.x && pt.x < e.pos.x + e.text.length * e.size * 0.06 && Math.abs(pt.y - e.pos.y - e.size * 0.04) < e.size * 0.07);
+    case 'section':
+      return projectOnSegment(pt, e.a, e.b).dist < tol * 1.5;
   }
 }
 

@@ -24,6 +24,11 @@ export interface WallType {
   thickness: number;
   color: string;
   function: 'exterior' | 'interior';
+  /** Mur de base ou mur-rideau (panneaux vitrés et meneaux). */
+  family?: 'basic' | 'curtain';
+  /** Mur-rideau : espacement des meneaux verticaux et des traverses horizontales. */
+  curtainSpacing?: number;
+  curtainRowSpacing?: number;
 }
 
 export interface DoorType {
@@ -57,6 +62,11 @@ export interface Wall extends BaseElement {
   b: Vec2;
   height: number;
   baseOffset: number;
+  /** Contrainte supérieure : hauteur pilotée par un niveau (null = hauteur non contrainte). */
+  topLevelId?: Id | null;
+  topOffset?: number;
+  /** Haut du mur attaché à la sous-face d'un toit. */
+  attachRoofId?: Id | null;
 }
 
 export interface Door extends BaseElement {
@@ -75,6 +85,76 @@ export interface Window extends BaseElement {
   typeId: Id;
   offset: number;
   sill: number;
+}
+
+/** Ouverture rectangulaire dans un mur (sans menuiserie). */
+export interface WallOpening extends BaseElement {
+  kind: 'opening';
+  hostId: Id;
+  offset: number;
+  width: number;
+  height: number;
+  sill: number;
+}
+
+/** Trémie : perce les sols et toits traversés. */
+export interface Shaft extends BaseElement {
+  kind: 'shaft';
+  levelId: Id;
+  points: Vec2[];
+  height: number;
+}
+
+export interface Ceiling extends BaseElement {
+  kind: 'ceiling';
+  levelId: Id;
+  points: Vec2[];
+  /** Hauteur de la sous-face au-dessus du niveau. */
+  height: number;
+  thickness: number;
+}
+
+export interface Railing extends BaseElement {
+  kind: 'railing';
+  levelId: Id;
+  /** Tracé ouvert du garde-corps. */
+  points: Vec2[];
+  height: number;
+  baseOffset: number;
+}
+
+/** Composant posé (mobilier, sanitaire, équipement) issu de la bibliothèque. */
+export interface Component extends BaseElement {
+  kind: 'component';
+  levelId: Id;
+  family: string;
+  pos: Vec2;
+  rotation: number;
+  width: number;
+  depth: number;
+  height: number;
+}
+
+export interface TextNote extends BaseElement {
+  kind: 'text';
+  levelId: Id;
+  pos: Vec2;
+  text: string;
+  /** Hauteur du texte sur papier, en mm. */
+  size: number;
+  rotation: number;
+}
+
+/** Ligne de coupe : génère une vue en coupe. */
+export interface Section extends BaseElement {
+  kind: 'section';
+  name: string;
+  a: Vec2;
+  b: Vec2;
+  /** Profondeur de vue au-delà du plan de coupe. */
+  depth: number;
+  /** Inverse le sens de visée. */
+  flip: boolean;
 }
 
 export interface Floor extends BaseElement {
@@ -156,7 +236,14 @@ export type Element =
   | Room
   | Stair
   | Dimension
-  | Grid;
+  | Grid
+  | WallOpening
+  | Shaft
+  | Ceiling
+  | Railing
+  | Component
+  | TextNote
+  | Section;
 
 export type ElementKind = Element['kind'];
 
@@ -171,6 +258,27 @@ export interface ProjectData {
   doorTypes: DoorType[];
   windowTypes: WindowType[];
   elements: Record<Id, Element>;
+  /** Réglages d'affichage par vue (clé de vue). */
+  viewSettings?: Record<string, ViewSettings>;
+  /** Informations du cartouche. */
+  info?: ProjectInfo;
+}
+
+export interface ViewSettings {
+  /** Catégories masquées dans la vue. */
+  hidden?: ElementKind[];
+  /** Échelle de la vue (dénominateur : 100 pour 1/100). */
+  scale?: number;
+  /** Affiche le niveau inférieur en grisé (plans). */
+  underlay?: boolean;
+}
+
+export interface ProjectInfo {
+  client?: string;
+  address?: string;
+  author?: string;
+  number?: string;
+  phase?: string;
 }
 
 export const KIND_LABELS: Record<ElementKind, string> = {
@@ -184,4 +292,14 @@ export const KIND_LABELS: Record<ElementKind, string> = {
   stair: 'Escalier',
   dimension: 'Cote',
   grid: 'Quadrillage',
+  opening: 'Ouverture',
+  shaft: 'Trémie',
+  ceiling: 'Faux-plafond',
+  railing: 'Garde-corps',
+  component: 'Composant',
+  text: 'Texte',
+  section: 'Coupe',
 };
+
+/** Éléments posés dans un mur hôte. */
+export type Hosted = Door | Window | WallOpening;

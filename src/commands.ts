@@ -1,91 +1,32 @@
 import type { App } from './app';
-import { add, bounds, polygonCentroid, rotate, v } from './model/geometry';
-import { newId } from './model/project';
+import { attachWallsToRoof, detachWalls, duplicate, elementsCenter, mirrorElements, rotateElements, withHosted } from './model/edit';
+import { add, v } from './model/geometry';
+import { isHosted, newId } from './model/project';
 import { buildingFootprint, offsetPolygon } from './model/rooms';
 import type { Element, Id, Level, Vec2 } from './model/types';
 
-let clipboard: Element[] = [];
-
-function transformElement(e: Element, f: (p: Vec2) => Vec2, mirror = false): void {
-  switch (e.kind) {
-    case 'wall':
-    case 'stair':
-    case 'dimension':
-    case 'grid':
-      e.a = f(e.a);
-      e.b = f(e.b);
-      break;
-    case 'floor':
-    case 'room':
-    case 'roof':
-      e.points = e.points.map(f);
-      // Une symétrie inverse le sens du contour : on le rétablit.
-      if (mirror) e.points.reverse();
-      break;
-    case 'column':
-      e.pos = f(e.pos);
-      break;
-    case 'door':
-    case 'window':
-      // Les ouvertures sont repositionnées avec leur mur hôte.
-      break;
-  }
-}
-
-/** Centre de la sélection (pour rotation / symétrie). */
-function selectionCenter(app: App, ids: Id[]): Vec2 {
-  const pts: Vec2[] = [];
-  for (const id of ids) {
-    const e = app.project.get(id);
-    if (!e) continue;
-    if ('a' in e) pts.push(e.a, e.b);
-    else if ('points' in e) pts.push(polygonCentroid(e.points));
-    else if (e.kind === 'column') pts.push(e.pos);
-  }
-  if (!pts.length) return v(0, 0);
-  const b = bounds(pts);
-  return v((b.min.x + b.max.x) / 2, (b.min.y + b.max.y) / 2);
-}
+let clipboard: { ids: Id[]; data: string } | null = null;
 
 export function copySelection(app: App): void {
-  const ids = new Set(app.selection);
-  // Les ouvertures accompagnent leur mur hôte.
-  for (const e of app.project.elements) if ((e.kind === 'door' || e.kind === 'window') && ids.has(e.hostId)) ids.add(e.id);
-  clipboard = [...ids].map((id) => app.project.get(id)).filter((e): e is Element => !!e).map((e) => structuredClone(e));
-  app.status(`${clipboard.length} élément(s) copié(s)`);
+  if (!app.selection.size) return;
+  // On mémorise un instantané : le collage fonctionne même si les originaux changent.
+  const ids = [...withHosted(app.project, app.selection)];
+  const data = JSON.stringify(ids.map((id) => app.project.get(id)).filter(Boolean));
+  clipboard = { ids, data };
+  app.status(`${ids.length} élément(s) copié(s)`);
 }
 
 export function paste(app: App, offset: Vec2 = v(1, -1)): void {
-  if (!clipboard.length) return;
+  if (!clipboard) return;
   const p = app.project;
-  const levelId = app.activeLevelId;
-  const idMap = new Map<Id, Id>();
-  const created: Id[] = [];
-  p.transact('Coller', () => {
-    for (const src of clipboard) {
-      if (src.kind === 'door' || src.kind === 'window') continue;
-      const e = structuredClone(src);
-      e.id = newId(e.kind[0]);
-      idMap.set(src.id, e.id);
-      if ('levelId' in e) e.levelId = levelId;
-      transformElement(e, (q) => add(q, offset));
-      if (e.mark && (e.kind === 'column' || e.kind === 'stair')) e.mark = p.nextMark(e.kind);
-      if (e.kind === 'room') e.number = p.nextRoomNumber();
-      if (e.kind === 'grid') e.label = p.nextGridLabel();
-      p.add(e);
-      created.push(e.id);
-    }
-    for (const src of clipboard) {
-      if (src.kind !== 'door' && src.kind !== 'window') continue;
-      const host = idMap.get(src.hostId);
-      if (!host) continue;
-      const e = structuredClone(src);
-      e.id = newId(e.kind[0]);
-      e.hostId = host;
-      e.mark = p.nextMark(e.kind);
-      p.add(e);
-      created.push(e.id);
-    }
+  const source = JSON.parse(clipboard.data) as Element[];
+  const created = p.transact('Coller', () => {
+    // Les éléments du presse-papiers absents du projet y sont réinsérés le temps de la duplication.
+    const before = new Set(Object.keys(p.data.elements));
+    for (const e of source) if (!p.data.elements[e.id]) p.data.elements[e.id] = structuredClone(e);
+    const ids = duplicate(p, source.filter((e) => !isHosted(e)).map((e) => e.id), (q) => add(q, offset), { levelId: app.activeLevelId });
+    for (const e of source) if (!before.has(e.id)) delete p.data.elements[e.id];
+    return ids;
   });
   app.select(created);
 }
@@ -93,44 +34,31 @@ export function paste(app: App, offset: Vec2 = v(1, -1)): void {
 export function rotateSelection(app: App, degrees = 90): void {
   const ids = [...app.selection];
   if (!ids.length) return;
-  const c = selectionCenter(app, ids);
-  const a = (degrees * Math.PI) / 180;
-  app.project.transact('Rotation', () => {
-    for (const id of ids) {
-      const e = app.project.get(id);
-      if (!e) continue;
-      transformElement(e, (q) => rotate(q, a, c));
-      if (e.kind === 'column') e.rotation = (e.rotation + degrees) % 360;
-    }
-  });
+  const c = elementsCenter(app.project, ids);
+  app.project.transact('Rotation', () => rotateElements(app.project, ids, c, degrees));
 }
 
 export function mirrorSelection(app: App, axis: 'x' | 'y'): void {
   const ids = [...app.selection];
   if (!ids.length) return;
-  const c = selectionCenter(app, ids);
-  const f = (q: Vec2): Vec2 => (axis === 'x' ? v(2 * c.x - q.x, q.y) : v(q.x, 2 * c.y - q.y));
-  app.project.transact('Symétrie', () => {
-    for (const id of ids) {
-      const e = app.project.get(id);
-      if (!e) continue;
-      transformElement(e, f, true);
-    }
-    // On inverse le sens des murs pour conserver leur côté extérieur ;
-    // les ouvertures sont donc remesurées depuis la nouvelle origine.
-    for (const id of ids) {
-      const e = app.project.get(id);
-      if (e?.kind !== 'wall') continue;
-      const L = Math.hypot(e.b.x - e.a.x, e.b.y - e.a.y);
-      for (const o of app.project.hosted(e.id)) {
-        o.offset = L - o.offset;
-        if (o.kind === 'door') o.flipHand = !o.flipHand;
-      }
-      const tmp = e.a;
-      e.a = e.b;
-      e.b = tmp;
-    }
-  });
+  const c = elementsCenter(app.project, ids);
+  const b = axis === 'x' ? v(c.x, c.y + 1) : v(c.x + 1, c.y);
+  app.project.transact('Symétrie', () => mirrorElements(app.project, ids, c, b));
+}
+
+export function attachSelectedWalls(app: App): void {
+  const walls = [...app.selection].filter((id) => app.project.get(id)?.kind === 'wall');
+  if (!walls.length) {
+    app.status('Sélectionnez des murs à attacher au toit.');
+    return;
+  }
+  const n = app.project.transact('Attacher haut', () => attachWallsToRoof(app.project, walls));
+  app.status(n ? `${n} mur(s) attaché(s) au toit.` : 'Aucun toit trouvé au-dessus des murs sélectionnés.');
+}
+
+export function detachSelectedWalls(app: App): void {
+  const walls = [...app.selection].filter((id) => app.project.get(id)?.kind === 'wall');
+  app.project.transact('Détacher haut', () => detachWalls(app.project, walls));
 }
 
 export function flipSelectedDoors(app: App, what: 'hand' | 'facing'): void {

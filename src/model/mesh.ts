@@ -1,8 +1,27 @@
 // Génération de la géométrie 3D (indépendante du moteur de rendu) : chaque
 // élément produit des solides triangulés, réutilisés par la vue 3D et l'export.
-import { polygonArea, projectOnSegment, roofFacets, roofHeightAt, stairSteps, wallPieces, add, mul, perp, type RoofFacet } from './geometry';
+import { ShapeUtils, Vector2 } from 'three';
+import { componentFamily } from './components';
+import {
+  add,
+  mul,
+  perp,
+  pointInPolygon,
+  polygonArea,
+  projectOnSegment,
+  roofFacets,
+  roofHeightAt,
+  segmentCrossings,
+  stairSteps,
+  wallDir,
+  wallLength,
+  wallPieces,
+  wallQuad,
+  type RoofFacet,
+  type WallOutline,
+} from './geometry';
 import type { Project } from './project';
-import type { Element, Id, Vec2 } from './types';
+import type { Element, Id, Roof, Vec2, Wall } from './types';
 
 /** Repère monde : x = est, y = haut, z = -nord (repère Three.js). */
 export type V3 = [number, number, number];
@@ -147,8 +166,69 @@ export function elementMeshes(p: Project, e: Element): ElementMesh | null {
     case 'wall': {
       const t = p.wallType(e.typeId);
       const base = lvlElev(e.levelId) + e.baseOffset;
-      for (const pc of wallPieces(e, p.outline(e), t.thickness, p.openingSpans(e))) {
-        solids.push({ positions: prism(pc.quad, base + pc.bottom, base + pc.top), color: t.color, material: 'opaque' });
+      const outline = p.outline(e);
+      const roof = e.attachRoofId ? p.get<'roof'>(e.attachRoofId) : undefined;
+      const top = roof ? roofUnderside(p, roof) : null;
+      const H = e.height;
+      // Haut du mur : sous-face du toit attaché, sinon hauteur du mur.
+      const topAt = (q: Vec2): number => {
+        const z = top?.(q);
+        return z === null || z === undefined ? base + H : Math.max(base + 0.05, z);
+      };
+      const splits = roof ? roofSplits(e, roof) : [];
+      if (t.family === 'curtain') {
+        solids.push(...curtainWall(e, outline, t.thickness, base, topAt, t.curtainSpacing ?? 1.5, t.curtainRowSpacing ?? 1.5, splits));
+        break;
+      }
+      for (const pc of wallPieces(e, outline, t.thickness, p.openingSpans(e))) {
+        if (!roof || pc.top < H - 1e-6) {
+          solids.push({ positions: prism(pc.quad, base + pc.bottom, base + pc.top), color: t.color, material: 'opaque' });
+          continue;
+        }
+        const cuts = [pc.s0, ...splits.filter((x) => x > pc.s0 + 1e-6 && x < pc.s1 - 1e-6), pc.s1];
+        for (let i = 0; i < cuts.length - 1; i++) {
+          const quad = wallQuad(e, outline, t.thickness, cuts[i], cuts[i + 1]);
+          solids.push({ positions: prism(quad, base + pc.bottom, topAt), color: t.color, material: 'opaque' });
+        }
+      }
+      break;
+    }
+    case 'opening':
+    case 'shaft':
+    case 'text':
+    case 'section':
+      return null;
+    case 'ceiling': {
+      const z = lvlElev(e.levelId) + e.height;
+      solids.push({ positions: prism(e.points, z, z + e.thickness), color: '#efece5', material: 'opaque' });
+      break;
+    }
+    case 'railing':
+      solids.push(...railing(e.points, lvlElev(e.levelId) + e.baseOffset, e.height));
+      break;
+    case 'component': {
+      const fam = componentFamily(e.family);
+      const base = lvlElev(e.levelId);
+      const a = (e.rotation * Math.PI) / 180;
+      const place = (x: number, y: number): Vec2 => {
+        const lx = x * e.width;
+        const ly = y * e.depth;
+        return { x: e.pos.x + lx * Math.cos(a) - ly * Math.sin(a), y: e.pos.y + lx * Math.sin(a) + ly * Math.cos(a) };
+      };
+      for (const b of fam.boxes) {
+        let pts: Vec2[];
+        if (b.round) {
+          const cx = (b.x0 + b.x1) / 2;
+          const cy = (b.y0 + b.y1) / 2;
+          pts = [];
+          for (let i = 0; i < 20; i++) {
+            const t = (i / 20) * Math.PI * 2;
+            pts.push(place(cx + (Math.cos(t) * (b.x1 - b.x0)) / 2, cy + (Math.sin(t) * (b.y1 - b.y0)) / 2));
+          }
+        } else {
+          pts = [place(b.x0, b.y0), place(b.x1, b.y0), place(b.x1, b.y1), place(b.x0, b.y1)];
+        }
+        solids.push({ positions: prism(pts, base + b.z0 * e.height, base + b.z1 * e.height), color: b.color, material: b.color === '#cfe6f5' ? 'glass' : 'opaque' });
       }
       break;
     }
@@ -201,7 +281,8 @@ export function elementMeshes(p: Project, e: Element): ElementMesh | null {
     }
     case 'floor': {
       const top = lvlElev(e.levelId) + e.offset;
-      solids.push({ positions: prism(e.points, top - e.thickness, top), color: '#bdb6a8', material: 'opaque' });
+      const holes = floorHoles(p, e.points, top);
+      solids.push({ positions: holes.length ? prismWithHoles(e.points, holes, top - e.thickness, top) : prism(e.points, top - e.thickness, top), color: '#bdb6a8', material: 'opaque' });
       break;
     }
     case 'roof': {
@@ -245,6 +326,131 @@ export function elementMeshes(p: Project, e: Element): ElementMesh | null {
       return null;
   }
   return { id: e.id, kind: e.kind, solids };
+}
+
+/** Hauteur absolue de la sous-face d'un toit en un point (null hors de son emprise). */
+export function roofUnderside(p: Project, roof: Roof): (q: Vec2) => number | null {
+  const base = (p.level(roof.levelId)?.elevation ?? 0) + roof.baseOffset;
+  const slope = roof.shape === 'flat' ? 0 : roof.slope;
+  return (q) => (pointInPolygon(q, roof.points) ? base + roofHeightAt(roof.points, slope, q, roof.shape) : null);
+}
+
+/** Abscisses du mur où la sous-face du toit change de pan (faîtage, arêtiers, rives). */
+function roofSplits(w: Wall, roof: Roof): number[] {
+  const slope = roof.shape === 'flat' ? 0 : roof.slope;
+  const segs: [Vec2, Vec2][] = [];
+  for (const f of roofFacets(roof.points, roof.shape, slope)) {
+    f.points.forEach((q, i) => segs.push([q, f.points[(i + 1) % f.points.length]]));
+  }
+  return segmentCrossings(w, segs);
+}
+
+/** Mur-rideau : vitrage continu, meneaux verticaux et traverses horizontales. */
+function curtainWall(
+  w: Wall,
+  outline: WallOutline,
+  thickness: number,
+  base: number,
+  topAt: (q: Vec2) => number,
+  spacing: number,
+  rowSpacing: number,
+  splits: number[],
+): Solid[] {
+  const L = wallLength(w);
+  const dir = wallDir(w);
+  const n = perp(dir);
+  const out: Solid[] = [];
+  const glass: number[] = [];
+  const frame: number[] = [];
+  const mull = 0.05;
+  const cols = Math.max(1, Math.round(L / Math.max(0.3, spacing)));
+  const cuts = [...new Set([0, ...splits, L].map((x) => Math.round(x * 1e6) / 1e6))].sort((a, b) => a - b);
+  for (let i = 0; i < cuts.length - 1; i++) {
+    const quad = wallQuad(w, outline, 0.02, cuts[i], cuts[i + 1]);
+    glass.push(...prism(quad, base, topAt));
+  }
+  const at = (s: number) => add(w.a, mul(dir, s));
+  for (let i = 0; i <= cols; i++) {
+    const s = Math.min(L - mull / 2, Math.max(mull / 2, (L * i) / cols));
+    const c = at(s);
+    const q = [add(add(c, mul(dir, -mull / 2)), mul(n, -thickness / 2)), add(add(c, mul(dir, mull / 2)), mul(n, -thickness / 2)), add(add(c, mul(dir, mull / 2)), mul(n, thickness / 2)), add(add(c, mul(dir, -mull / 2)), mul(n, thickness / 2))];
+    frame.push(...prism(q, base, topAt(c)));
+  }
+  const H = Math.min(...[0, L / 2, L].map((s) => topAt(at(s)))) - base;
+  const rows = Math.max(1, Math.round(H / Math.max(0.3, rowSpacing)));
+  for (let j = 0; j <= rows; j++) {
+    const z = base + Math.min(H - mull, Math.max(0, (H * j) / rows - mull / 2));
+    frame.push(...prism(wallQuad(w, outline, thickness, 0, L), z, z + mull));
+  }
+  out.push({ positions: glass, color: '#9cc9e8', material: 'glass' }, { positions: frame, color: '#5f666d', material: 'opaque' });
+  return out;
+}
+
+/** Garde-corps : poteaux, main courante et remplissage vitré. */
+function railing(pts: Vec2[], base: number, height: number): Solid[] {
+  const posts: number[] = [];
+  const rail: number[] = [];
+  const glass: number[] = [];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i];
+    const b = pts[i + 1];
+    const L = Math.hypot(b.x - a.x, b.y - a.y);
+    if (L < 1e-6) continue;
+    const dir = { x: (b.x - a.x) / L, y: (b.y - a.y) / L };
+    const mid = mul(add(a, b), 0.5);
+    rail.push(...orientedBox(mid, dir, L + 0.05, 0.05, base + height - 0.05, base + height));
+    glass.push(...orientedBox(mid, dir, L, 0.012, base + 0.1, base + height - 0.08));
+    const n = Math.max(1, Math.ceil(L / 1.2));
+    for (let k = 0; k <= n; k++) {
+      if (k === 0 && i > 0) continue;
+      posts.push(...orientedBox(add(a, mul(dir, (L * k) / n)), dir, 0.04, 0.04, base, base + height));
+    }
+  }
+  return [
+    { positions: posts, color: '#6d737a', material: 'opaque' },
+    { positions: rail, color: '#6d737a', material: 'opaque' },
+    { positions: glass, color: '#bfe0f2', material: 'glass' },
+  ];
+}
+
+/** Contours des trémies qui traversent un sol dont le dessus est à l'altitude z. */
+export function floorHoles(p: Project, outline: Vec2[], z: number): Vec2[][] {
+  const holes: Vec2[][] = [];
+  for (const sh of p.ofKind('shaft')) {
+    const base = p.level(sh.levelId)?.elevation ?? 0;
+    if (z < base - 0.01 || z > base + sh.height + 0.01) continue;
+    if (sh.points.length < 3 || !sh.points.some((q) => pointInPolygon(q, outline))) continue;
+    holes.push(sh.points);
+  }
+  return holes;
+}
+
+/** Prisme percé : contour extérieur et trous intérieurs. */
+export function prismWithHoles(outer: Vec2[], holes: Vec2[][], z0: number, z1: number): number[] {
+  const out: number[] = [];
+  const ring = polygonArea(outer) >= 0 ? outer : [...outer].reverse();
+  const hs = holes.map((h) => (polygonArea(h) >= 0 ? [...h].reverse() : h));
+  const all = [...ring, ...hs.flat()];
+  const tris = ShapeUtils.triangulateShape(
+    ring.map((q) => new Vector2(q.x, q.y)),
+    hs.map((h) => h.map((q) => new Vector2(q.x, q.y))),
+  );
+  for (const [a, b, c] of tris) {
+    // triangulateShape renvoie des triangles orientés comme le contour extérieur.
+    const [pa, pb, pc] = [all[a], all[b], all[c]];
+    const ccw = (pb.x - pa.x) * (pc.y - pa.y) - (pb.y - pa.y) * (pc.x - pa.x) > 0;
+    const [q1, q2] = ccw ? [pb, pc] : [pc, pb];
+    pushTri(out, toW(pa, z1), toW(q1, z1), toW(q2, z1));
+    pushTri(out, toW(pa, z0), toW(q2, z0), toW(q1, z0));
+  }
+  for (const loop of [ring, ...hs]) {
+    for (let i = 0; i < loop.length; i++) {
+      const q = loop[i];
+      const r = loop[(i + 1) % loop.length];
+      pushQuad(out, toW(q, z0), toW(r, z0), toW(r, z1), toW(q, z1));
+    }
+  }
+  return out;
 }
 
 /** Volume d'un maillage fermé (théorème de la divergence). */

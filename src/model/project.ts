@@ -1,6 +1,6 @@
 import { wallDir, wallLength, wallOutline, wallTypeThickness, add, mul, type OpeningSpan, type WallOutline } from './geometry';
 import type {
-  Door,
+  Hosted,
   DoorType,
   Element,
   ElementKind,
@@ -12,7 +12,6 @@ import type {
   Vec2,
   Wall,
   WallType,
-  Window,
   WindowType,
 } from './types';
 
@@ -57,6 +56,7 @@ export class Project {
 
   load(data: ProjectData): void {
     this.data = normalize(data);
+    this.syncConstraints();
     this.undoStack = [];
     this.redoStack = [];
     this.dirty = false;
@@ -67,6 +67,7 @@ export class Project {
   transact<T>(label: string, fn: (d: ProjectData) => T): T {
     const snapshot = JSON.stringify(this.data);
     const result = fn(this.data);
+    this.syncConstraints();
     this.pushHistory(label, snapshot);
     this.emit();
     return result;
@@ -79,6 +80,7 @@ export class Project {
 
   /** Valide une modification interactive commencée avec snapshot(). */
   commit(label: string, before: string): void {
+    this.syncConstraints();
     if (before === JSON.stringify(this.data)) return;
     this.pushHistory(label, before);
     this.emit();
@@ -198,27 +200,56 @@ export class Project {
     this.outlineCache = null;
   }
 
-  hosted(wallId: Id): (Door | Window)[] {
-    return this.elements.filter(
-      (e): e is Door | Window => (e.kind === 'door' || e.kind === 'window') && e.hostId === wallId,
-    );
+  hosted(wallId: Id): Hosted[] {
+    return this.elements.filter((e): e is Hosted => isHosted(e) && e.hostId === wallId);
+  }
+
+  /** Largeur, hauteur et allège d'un élément hébergé. */
+  openingSize(o: Hosted): { width: number; height: number; bottom: number } {
+    if (o.kind === 'door') {
+      const t = this.doorType(o.typeId);
+      return { width: t.width, height: t.height, bottom: 0 };
+    }
+    if (o.kind === 'window') {
+      const t = this.windowType(o.typeId);
+      return { width: t.width, height: t.height, bottom: o.sill };
+    }
+    return { width: o.width, height: o.height, bottom: o.sill };
   }
 
   openingSpans(w: Wall): OpeningSpan[] {
     return this.hosted(w.id).map((o) => {
-      const t = o.kind === 'door' ? this.doorType(o.typeId) : this.windowType(o.typeId);
-      const bottom = o.kind === 'door' ? 0 : o.sill;
-      return { id: o.id, start: o.offset - t.width / 2, end: o.offset + t.width / 2, bottom, top: bottom + t.height };
+      const { width, height, bottom } = this.openingSize(o);
+      return { id: o.id, start: o.offset - width / 2, end: o.offset + width / 2, bottom, top: bottom + height };
     });
   }
 
   /** Position du centre et direction d'une ouverture en plan. */
-  openingFrame(o: Door | Window): { center: Vec2; dir: Vec2; width: number; wall: Wall } | null {
+  openingFrame(o: Hosted): { center: Vec2; dir: Vec2; width: number; wall: Wall } | null {
     const w = this.get<'wall'>(o.hostId);
     if (!w) return null;
     const dir = wallDir(w);
-    const t = o.kind === 'door' ? this.doorType(o.typeId) : this.windowType(o.typeId);
-    return { center: add(w.a, mul(dir, o.offset)), dir, width: t.width, wall: w };
+    return { center: add(w.a, mul(dir, o.offset)), dir, width: this.openingSize(o).width, wall: w };
+  }
+
+  /**
+   * Met à jour les hauteurs pilotées par des contraintes (murs contraints à un
+   * niveau supérieur). Appelé après chaque modification.
+   */
+  syncConstraints(): void {
+    for (const e of this.elements) {
+      if (e.kind !== 'wall' || !e.topLevelId) continue;
+      const top = this.level(e.topLevelId);
+      const base = this.level(e.levelId);
+      if (!top || !base) {
+        e.topLevelId = null;
+        continue;
+      }
+      e.height = Math.max(0.1, top.elevation + (e.topOffset ?? 0) - (base.elevation + e.baseOffset));
+    }
+    for (const e of this.elements) {
+      if (e.kind === 'wall' && e.attachRoofId && !this.data.elements[e.attachRoofId]) e.attachRoofId = null;
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -232,7 +263,7 @@ export class Project {
   remove(ids: Iterable<Id>): void {
     const set = new Set(ids);
     for (const e of this.elements) {
-      if ((e.kind === 'door' || e.kind === 'window') && set.has(e.hostId)) set.add(e.id);
+      if (isHosted(e) && set.has(e.hostId)) set.add(e.id);
     }
     for (const id of set) delete this.data.elements[id];
   }
@@ -240,13 +271,13 @@ export class Project {
   /** Recale les ouvertures dans les limites de leur mur hôte. */
   clampOpenings(): void {
     for (const e of this.elements) {
-      if (e.kind !== 'door' && e.kind !== 'window') continue;
+      if (!isHosted(e)) continue;
       const w = this.get<'wall'>(e.hostId);
       if (!w) {
         delete this.data.elements[e.id];
         continue;
       }
-      const t = e.kind === 'door' ? this.doorType(e.typeId) : this.windowType(e.typeId);
+      const t = this.openingSize(e);
       const L = wallLength(w);
       e.offset = Math.min(Math.max(e.offset, Math.min(t.width / 2, L / 2)), Math.max(L - t.width / 2, L / 2));
     }
@@ -280,9 +311,14 @@ export class Project {
   }
 }
 
+export function isHosted(e: Element): e is Hosted {
+  return e.kind === 'door' || e.kind === 'window' || e.kind === 'opening';
+}
+
+/** Niveau d'un élément ; undefined pour les éléments visibles sur tous les plans (quadrillages, coupes). */
 export function levelOf(project: Project, e: Element): Id | undefined {
-  if (e.kind === 'grid') return undefined;
-  if (e.kind === 'door' || e.kind === 'window') return project.get<'wall'>(e.hostId)?.levelId;
+  if (e.kind === 'grid' || e.kind === 'section') return undefined;
+  if (isHosted(e)) return project.get<'wall'>(e.hostId)?.levelId;
   return e.levelId;
 }
 
@@ -300,6 +336,8 @@ export function normalize(data: ProjectData): ProjectData {
     doorTypes: data.doorTypes ?? [],
     windowTypes: data.windowTypes ?? [],
     elements: data.elements ?? {},
+    viewSettings: data.viewSettings ?? {},
+    info: data.info ?? {},
   };
 }
 

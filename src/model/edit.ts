@@ -41,6 +41,7 @@ export function transformElement(e: Element, f: Transform, mirror = false): void
     case 'ceiling':
     case 'railing':
       e.points = e.points.map(f);
+      if (e.kind === 'room' && e.seed) e.seed = f(e.seed);
       // Une symétrie inverse le sens du contour ; on le rétablit (sauf tracé ouvert).
       if (mirror && e.kind !== 'railing') e.points.reverse();
       break;
@@ -157,6 +158,32 @@ export function linkedWallEnds(p: Project, points: Vec2[], exclude: Set<Id>, lev
   return refs;
 }
 
+/**
+ * Extrémités de murs non déplacés appuyées en T sur un mur déplacé : elles
+ * suivent la composante perpendiculaire du déplacement pour rester jointes.
+ */
+export function tJoinedEnds(p: Project, movedIds: Set<Id>): { id: Id; end: 'a' | 'b'; origin: Vec2; normal: Vec2 }[] {
+  const out: { id: Id; end: 'a' | 'b'; origin: Vec2; normal: Vec2 }[] = [];
+  for (const id of movedIds) {
+    const w = p.get<'wall'>(id);
+    if (!w || w.kind !== 'wall') continue;
+    const L = wallLength(w);
+    const n = perp(wallDir(w));
+    const tol = p.thickness(w) / 2 + 1e-3;
+    for (const o of p.ofKind('wall', w.levelId)) {
+      if (movedIds.has(o.id)) continue;
+      for (const end of ['a', 'b'] as const) {
+        const pr = projectOnSegment(o[end], w.a, w.b);
+        const s = pr.t * L;
+        if (pr.dist <= tol && s > 1e-3 && s < L - 1e-3 && !samePoint(o[end], w.a) && !samePoint(o[end], w.b)) {
+          out.push({ id: o.id, end, origin: { ...o[end] }, normal: n });
+        }
+      }
+    }
+  }
+  return out;
+}
+
 /** Déplace des éléments ; les murs raccordés non sélectionnés s'étirent pour suivre. */
 export function moveElements(p: Project, ids: Iterable<Id>, delta: Vec2, stretch = true): void {
   const set = new Set(ids);
@@ -166,6 +193,7 @@ export function moveElements(p: Project, ids: Iterable<Id>, delta: Vec2, stretch
     if (e?.kind === 'wall') wallPts.push(e.a, e.b);
   }
   const linked = stretch ? linkedWallEnds(p, wallPts, set) : [];
+  const tees = stretch ? tJoinedEnds(p, set) : [];
   for (const id of set) {
     const e = p.get(id);
     if (!e) continue;
@@ -180,6 +208,10 @@ export function moveElements(p: Project, ids: Iterable<Id>, delta: Vec2, stretch
   for (const l of linked) {
     const w = p.get<'wall'>(l.id);
     if (w) w[l.end] = add(l.origin, delta);
+  }
+  for (const t of tees) {
+    const w = p.get<'wall'>(t.id);
+    if (w) w[t.end] = add(t.origin, mul(t.normal, dot(delta, t.normal)));
   }
   p.clampOpenings();
 }

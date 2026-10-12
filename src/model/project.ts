@@ -1,8 +1,10 @@
 import { wallDir, wallLength, wallOutline, wallTypeThickness, add, mul, type OpeningSpan, type WallOutline } from './geometry';
 import { evaluateFamily, type FamilyResult } from './family';
 import { defaultFamilies } from './familyLibrary';
+import { detectRoom } from './rooms';
 import type {
   Component,
+  Room,
   FamilyDef,
   Hosted,
   DoorType,
@@ -345,6 +347,36 @@ export class Project {
     return { center: add(w.a, mul(dir, o.offset)), dir, width: this.openingSize(o).width, wall: w };
   }
 
+  /** Signature des éléments délimitant les pièces, par niveau (murs, poteaux). */
+  private roomBoundarySig = new Map<Id, string>();
+
+  /** Recalcule le contour des pièces délimitées des niveaux dont les murs ont changé. */
+  private updateBoundedRooms(): void {
+    const rooms = this.elements.filter((e): e is Room => e.kind === 'room' && !!e.seed);
+    if (!rooms.length) return;
+    const levels = new Set(rooms.map((r) => r.levelId));
+    for (const lv of levels) {
+      const sig = JSON.stringify([
+        this.elements.filter((e) => e.kind === 'wall' && e.levelId === lv).map((w) => (w.kind === 'wall' ? [w.a, w.b, this.thickness(w)] : 0)),
+        this.elements.filter((e) => e.kind === 'column' && e.levelId === lv).map((c) => (c.kind === 'column' ? [c.pos, c.width] : 0)),
+        rooms.filter((r) => r.levelId === lv).map((r) => r.seed),
+      ]);
+      if (this.roomBoundarySig.get(lv) === sig) continue;
+      this.roomBoundarySig.set(lv, sig);
+      this.invalidate();
+      for (const r of rooms) {
+        if (r.levelId !== lv) continue;
+        const pts = detectRoom(this, lv, r.seed!);
+        if (pts) {
+          r.points = pts;
+          r.notEnclosed = undefined;
+        } else {
+          r.notEnclosed = true;
+        }
+      }
+    }
+  }
+
   /**
    * Met à jour les hauteurs pilotées par des contraintes (murs contraints à un
    * niveau supérieur). Appelé après chaque modification.
@@ -367,6 +399,7 @@ export class Project {
     for (const e of this.elements) {
       if (e.kind === 'wall' && e.attachRoofId && !this.data.elements[e.attachRoofId]) e.attachRoofId = null;
     }
+    this.updateBoundedRooms();
   }
 
   // -------------------------------------------------------------------------

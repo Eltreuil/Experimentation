@@ -1,6 +1,6 @@
 import type { App } from '../app';
 import { flipSelectedDoors } from '../commands';
-import { polygonArea, polygonPerimeter, stairRisers, wallLength, add, mul, wallDir, dist } from '../model/geometry';
+import { polygonArea, polygonCentroid, polygonPerimeter, stairRisers, wallLength, add, mul, wallDir, dist } from '../model/geometry';
 import { formatLength, levelOf } from '../model/project';
 import { familyEditor, formatParam, paramField } from './familyEditor';
 import { wallLayersDialog } from './dialogs';
@@ -289,6 +289,15 @@ export class PropertiesPanel {
         id.append(row('Numéro', textField(e.number, (val) => this.edit('Numéro', () => (e.number = val)))));
         id.append(row('Nom', textField(e.name, (val) => this.edit('Nom', () => (e.name = val)))));
         id.append(row('Commentaires', textField(e.comments ?? '', (val) => this.edit('Commentaires', () => (e.comments = val || undefined)))));
+        const c = this.section(root, 'Contraintes');
+        c.append(
+          row(
+            'Délimitée par les murs',
+            checkField(!!e.seed, (val) => this.edit('Pièce délimitée', () => (e.seed = val ? polygonCentroid(e.points) : undefined))),
+            'Le contour suit automatiquement les murs',
+          ),
+        );
+        if (e.notEnclosed) c.append(h('div', { class: 'fe-errors' }, '⚠ Pièce non fermée : les murs ne délimitent plus un espace clos autour de son point d’insertion.'));
         const d = this.section(root, 'Cotes');
         d.append(row('Niveau', readonlyField(p.level(e.levelId)?.name ?? '')));
         d.append(row('Surface', readonlyField(`${Math.abs(polygonArea(e.points)).toFixed(2)} m²`)));

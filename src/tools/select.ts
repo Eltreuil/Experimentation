@@ -1,4 +1,6 @@
-import { add, dot, samePoint, sub, wallDir } from '../model/geometry';
+import { add, dot, mul, perp, samePoint, sub, wallDir, wallLength } from '../model/geometry';
+import { linkedWallEnds, tJoinedEnds } from '../model/edit';
+import { isHosted } from '../model/project';
 import type { Element, Id, Vec2 } from '../model/types';
 import type { PlanView } from '../views/planView';
 import type { PointerInfo, Tool } from './tool';
@@ -13,7 +15,7 @@ interface GripRef {
 
 type DragState =
   | { mode: 'box'; start: Vec2; current: Vec2; screenStart: Vec2 }
-  | { mode: 'move'; start: Vec2; before: string; originals: Map<Id, Element>; moved: boolean; stretch: StretchRef[] }
+  | { mode: 'move'; start: Vec2; before: string; originals: Map<Id, Element>; moved: boolean; stretch: StretchRef[]; tees: ReturnType<typeof tJoinedEnds> }
   | { mode: 'grip'; grip: GripRef; before: string; original: Element; linked: StretchRef[] };
 
 /** Extrémité d'un mur raccordé qui doit suivre un déplacement. */
@@ -89,7 +91,37 @@ export class SelectTool implements Tool {
     return refs;
   }
 
+  private setWallLength(id: Id, length: number): void {
+    const proj = this.project;
+    proj.transact('Longueur du mur', () => {
+      const w = proj.get<'wall'>(id);
+      if (!w) return;
+      const nb = add(w.a, mul(wallDir(w), length));
+      // Les murs raccordés à l'extrémité déplacée suivent.
+      for (const l of linkedWallEnds(proj, [w.b], new Set([id]), w.levelId)) {
+        const o = proj.get<'wall'>(l.id);
+        if (o) o[l.end] = { ...nb };
+      }
+      w.b = nb;
+      proj.clampOpenings();
+    });
+  }
+
+  private setOpening(id: Id, offset: number): void {
+    const proj = this.project;
+    proj.transact('Position de l’ouverture', () => {
+      const o = proj.get(id);
+      if (o && isHosted(o)) o.offset = offset;
+      proj.clampOpenings();
+    });
+  }
+
   onDown(p: PointerInfo): void {
+    const dim = this.view.editableDimAt(p.raw);
+    if (dim) {
+      this.view.editValue(dim.pos, dim.value, dim.apply);
+      return;
+    }
     const grip = this.gripAt(p.raw);
     if (grip) {
       const original = structuredClone(this.project.get(grip.id)!);
@@ -116,9 +148,10 @@ export class SelectTool implements Tool {
       const movedWallPts: Vec2[] = [];
       for (const e of originals.values()) if (e.kind === 'wall') movedWallPts.push(e.a, e.b);
       const stretch = this.linkedEnds(movedWallPts, new Set(originals.keys()), this.view.levelId);
-      this.snapExclude = new Set([...originals.keys(), ...stretch.map((s) => s.id)]);
+      const tees = tJoinedEnds(this.project, new Set(originals.keys()));
+      this.snapExclude = new Set([...originals.keys(), ...stretch.map((s) => s.id), ...tees.map((t) => t.id)]);
       const start = this.view.snap(p.raw, {}).point;
-      this.drag = { mode: 'move', start, before: this.project.snapshot(), originals, moved: false, stretch };
+      this.drag = { mode: 'move', start, before: this.project.snapshot(), originals, moved: false, stretch, tees };
       return;
     }
     this.drag = { mode: 'box', start: p.raw, current: p.raw, screenStart: this.view.w2s(p.raw) };
@@ -153,6 +186,10 @@ export class SelectTool implements Tool {
     for (const s of d.stretch) {
       const w = this.project.get<'wall'>(s.id);
       if (w) w[s.end] = add(s.origin, delta);
+    }
+    for (const t of d.tees) {
+      const w = this.project.get<'wall'>(t.id);
+      if (w) w[t.end] = add(t.origin, mul(t.normal, dot(delta, t.normal)));
     }
     this.project.clampOpenings();
     this.project.touch();
@@ -219,10 +256,25 @@ export class SelectTool implements Tool {
       ctx.restore();
     }
     for (const g of this.grips()) this.view.drawGrip(g.point, d?.mode === 'grip' && d.grip.key === g.key);
-    // Cote temporaire de longueur pour un mur sélectionné (comme dans Revit).
-    if (this.app.selection.size === 1) {
+    // Cotes temporaires modifiables (comme dans Revit) pour l'élément sélectionné.
+    if (this.app.selection.size === 1 && !d) {
       const e = this.project.get([...this.app.selection][0]);
-      if (e?.kind === 'wall') this.view.drawTempDimension(e.a, e.b, 28);
+      if (e?.kind === 'wall') {
+        this.view.drawTempDimension(e.a, e.b, 28, (m) => this.setWallLength(e.id, m));
+      } else if (e && isHosted(e)) {
+        const w = this.project.get<'wall'>(e.hostId);
+        if (w) {
+          const dir = wallDir(w);
+          const width = this.project.openingSize(e).width;
+          const L = wallLength(w);
+          const start = e.offset - width / 2;
+          const n = mul(perp(dir), this.project.thickness(w) / 2);
+          const at = (s: number) => add(add(w.a, mul(dir, s)), n);
+          // Distances aux extrémités du mur, de part et d'autre de l'ouverture.
+          this.view.drawTempDimension(at(0), at(start), 26, (m) => this.setOpening(e.id, m + width / 2));
+          this.view.drawTempDimension(at(start + width), at(L), 26, (m) => this.setOpening(e.id, L - m - width / 2));
+        }
+      }
     }
   }
 }
@@ -247,6 +299,7 @@ function applyMove(e: Element, orig: Element, delta: Vec2, selection: Set<Id>, h
     case 'railing': {
       const o = orig as typeof e;
       e.points = o.points.map((p) => add(p, delta));
+      if (e.kind === 'room' && o.kind === 'room' && o.seed) e.seed = add(o.seed, delta);
       break;
     }
     case 'column':

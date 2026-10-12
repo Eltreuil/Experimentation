@@ -20,7 +20,7 @@ import {
   v,
   wallPieces,
 } from '../model/geometry';
-import { formatLength, levelOf, type Project } from '../model/project';
+import { formatLength, levelOf, parseLength, type Project } from '../model/project';
 import type { Ceiling, Column, Component, Dimension, Door, Element, ElementKind, ElementOf, Floor, Grid, Id, Railing, Room, Roof, Section, Shaft, Stair, TextNote, Vec2, ViewSettings, Wall, WallLayer, WallOpening, Window } from '../model/types';
 import { placer } from '../model/family';
 import type { PointerInfo, SnapKind, SnapResult, Tool } from '../tools/tool';
@@ -57,6 +57,8 @@ export class PlanView {
   ctx: CanvasRenderingContext2D;
   cam = { cx: 5, cy: 4, scale: 50 };
   hoverId: Id | null = null;
+  /** Cotes temporaires modifiables affichées lors du dernier rendu. */
+  editableDims: { pos: Vec2; value: number; apply: (value: number) => void }[] = [];
   /** Menu contextuel (clic droit avec l'outil de sélection). */
   onContextMenu: ((x: number, y: number, hit: Id | null) => void) | null = null;
   /** Calque courant (export DXF/SVG). */
@@ -499,6 +501,7 @@ export class PlanView {
     ctx.fillRect(0, 0, this.width, this.height);
     if (!clean) this.drawBackgroundGrid();
 
+    this.editableDims = [];
     this.drawModel();
 
     const p = this.project;
@@ -1037,7 +1040,8 @@ export class PlanView {
   }
 
   private drawRoomFill(r: Room): void {
-    this.poly(r.points, { fill: COLORS.room });
+    this.poly(r.points, { fill: r.notEnclosed ? 'rgba(217,48,37,0.08)' : COLORS.room });
+    if (r.notEnclosed) this.poly(r.points, { stroke: '#d93025', width: 1 }, [6, 4]);
   }
 
   private drawRoomTag(r: Room): void {
@@ -1045,7 +1049,8 @@ export class PlanView {
     const c = polygonCentroid(r.points);
     const size = this.annotationSize(0.25);
     const area = Math.abs(polygonArea(r.points));
-    this.text(c, r.name, { size, bold: true, baseline: 'bottom' });
+    this.text(c, r.name, { size, bold: true, baseline: 'bottom', color: r.notEnclosed ? '#d93025' : undefined });
+    if (r.notEnclosed) this.text(v(c.x, c.y + this.px(size * 1.6)), '⚠ Pièce non fermée', { size: size * 0.75, color: '#d93025' });
     this.text(v(c.x, c.y - this.px(size * 0.15)), `${r.number} · ${area.toFixed(2)} m²`, {
       size: size * 0.8,
       baseline: 'top',
@@ -1132,9 +1137,10 @@ export class PlanView {
     }
   }
 
-  drawDimension(d: Dimension, color: string = COLORS.annotation): void {
+  /** Dessine une cote ; retourne la position du texte (pour les cotes temporaires modifiables). */
+  drawDimension(d: Dimension, color: string = COLORS.annotation): Vec2 | null {
     const dir = norm(sub(d.b, d.a));
-    if (dist(d.a, d.b) < 1e-6) return;
+    if (dist(d.a, d.b) < 1e-6) return null;
     const n = perp(dir);
     const a2 = add(d.a, mul(n, d.offset));
     const b2 = add(d.b, mul(n, d.offset));
@@ -1153,7 +1159,9 @@ export class PlanView {
     const up = v(Math.sin(angle), Math.cos(angle));
     const mid = mul(add(a2, b2), 0.5);
     const label = formatLength(dist(d.a, d.b), this.project.data.units);
-    this.text(add(mid, mul(up, this.px(8))), label, { size: this.annotationSize(0.2), angle, color });
+    const pos = add(mid, mul(up, this.px(8)));
+    this.text(pos, label, { size: this.annotationSize(0.2), angle, color, bg: d.id === '_tmp' ? 'rgba(255,255,255,0.85)' : undefined });
+    return pos;
   }
 
   drawGrid(g: Grid, color: string = COLORS.gridLine): void {
@@ -1240,10 +1248,61 @@ export class PlanView {
   }
 
   /** Cote temporaire affichée pendant le tracé. */
-  drawTempDimension(a: Vec2, b: Vec2, offsetPx = 18): void {
+  /**
+   * Cote temporaire. Si `apply` est fournie, la valeur est modifiable : un
+   * clic sur le texte ouvre une saisie (comme les cotes temporaires de Revit).
+   */
+  drawTempDimension(a: Vec2, b: Vec2, offsetPx = 18, apply?: (value: number) => void): void {
     if (dist(a, b) < 1e-4) return;
     const d: Dimension = { id: '_tmp', kind: 'dimension', levelId: this.levelId, a, b, offset: this.px(offsetPx) };
-    this.drawDimension(d, COLORS.select);
+    const pos = this.drawDimension(d, COLORS.select);
+    if (pos && apply) this.editableDims.push({ pos, value: dist(a, b), apply });
+  }
+
+  /** Cote temporaire modifiable sous le pointeur (coordonnées monde). */
+  editableDimAt(p: Vec2): { pos: Vec2; value: number; apply: (value: number) => void } | null {
+    const tol = this.px(16);
+    let best: (typeof this.editableDims)[number] | null = null;
+    let bestD = tol;
+    for (const d of this.editableDims) {
+      const dd = dist(d.pos, p);
+      if (dd < bestD) {
+        bestD = dd;
+        best = d;
+      }
+    }
+    return best;
+  }
+
+  /** Champ de saisie flottant posé sur le canevas. */
+  editValue(world: Vec2, value: number, onCommit: (m: number) => void): void {
+    const units = this.project.data.units;
+    const s = this.w2s(world);
+    const input = document.createElement('input');
+    input.className = 'dim-input';
+    input.value = formatLength(value, units);
+    input.style.left = `${s.x}px`;
+    input.style.top = `${s.y}px`;
+    this.container.append(input);
+    let done = false;
+    const finish = (ok: boolean) => {
+      if (done) return;
+      done = true;
+      const m = parseLength(input.value, units);
+      input.remove();
+      if (ok && m !== null && m > 0) onCommit(m);
+      this.canvas.focus();
+    };
+    input.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') finish(true);
+      if (e.key === 'Escape') finish(false);
+    });
+    input.addEventListener('blur', () => finish(true));
+    setTimeout(() => {
+      input.focus();
+      input.select();
+    }, 0);
   }
 
   get colors() {

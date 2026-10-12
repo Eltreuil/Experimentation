@@ -291,6 +291,13 @@ export interface Room extends BaseElement {
   points: Vec2[];
   name: string;
   number: string;
+  /**
+   * Point d'insertion d'une pièce délimitée par les murs : son contour est
+   * recalculé automatiquement quand les murs changent. Absent : contour dessiné.
+   */
+  seed?: Vec2;
+  /** Vrai si la pièce délimitée n'est plus fermée par des murs. */
+  notEnclosed?: boolean;
 }
 
 export interface Stair extends BaseElement {

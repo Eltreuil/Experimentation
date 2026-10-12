@@ -120,6 +120,7 @@ export function sampleProject(): ProjectData {
     kind: 'room',
     levelId: 'lvl-0',
     name: 'Séjour',
+    seed: { x: 3, y: 2.5 },
     number: '001',
     points: [
       { x: 0.15, y: 0.15 },
@@ -133,6 +134,7 @@ export function sampleProject(): ProjectData {
     kind: 'room',
     levelId: 'lvl-0',
     name: 'Cuisine',
+    seed: { x: 8, y: 6.2 },
     number: '002',
     points: [
       { x: 6.075, y: 4.535 },
@@ -146,6 +148,7 @@ export function sampleProject(): ProjectData {
     kind: 'room',
     levelId: 'lvl-0',
     name: 'Entrée / Escalier',
+    seed: { x: 7, y: 2.3 },
     number: '003',
     points: [
       { x: 6.075, y: 0.15 },
@@ -188,6 +191,7 @@ export function sampleProject(): ProjectData {
     kind: 'room',
     levelId: 'lvl-1',
     name: 'Chambre 1',
+    seed: { x: 2.5, y: 2 },
     number: '101',
     points: [
       { x: 0.15, y: 0.15 },
@@ -201,6 +205,7 @@ export function sampleProject(): ProjectData {
     kind: 'room',
     levelId: 'lvl-1',
     name: 'Chambre 2',
+    seed: { x: 2.5, y: 6 },
     number: '102',
     points: [
       { x: 0.15, y: 4.035 },

@@ -470,11 +470,11 @@ export class RoomTool implements Tool {
     return this.view.project.ofKind(this.kind, this.view.levelId).some((r) => r.points.length > 2 && pointIn(q, r.points));
   }
 
-  private create(pts: Vec2[]): void {
+  private create(pts: Vec2[], seed?: Vec2): void {
     const proj = this.view.project;
     const levelId = this.view.levelId;
     if (this.kind === 'room') {
-      proj.transact('Pièce', () => proj.add<Room>({ id: newId('r'), kind: 'room', levelId, points: pts, name: 'Pièce', number: proj.nextRoomNumber() }));
+      proj.transact('Pièce', () => proj.add<Room>({ id: newId('r'), kind: 'room', levelId, points: pts, name: 'Pièce', number: proj.nextRoomNumber(), seed }));
     } else {
       const o = this.view.app.options;
       proj.transact('Faux-plafond', () => proj.add<Ceiling>({ id: newId('fp'), kind: 'ceiling', levelId, points: pts, height: o.ceilingHeight, thickness: 0.02 }));
@@ -509,7 +509,7 @@ export class RoomTool implements Tool {
       this.view.app.status('Impossible : l’espace n’est pas fermé par des murs.');
       return;
     }
-    this.create(pts);
+    this.create(pts, { ...p.raw });
     this.hover = null;
   }
 

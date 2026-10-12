@@ -16,7 +16,7 @@ import {
   trimToCorner,
   wallChainPoints,
 } from '../src/model/edit';
-import { wallLength } from '../src/model/geometry';
+import { polygonArea, wallLength } from '../src/model/geometry';
 import { elementMeshes, floorHoles, meshVolume } from '../src/model/mesh';
 import { Project, newId } from '../src/model/project';
 import type { Wall } from '../src/model/types';
@@ -197,5 +197,25 @@ describe('contraintes et nouveaux éléments', () => {
     expect(mesh.solids.some((s) => s.material === 'glass')).toBe(true);
     for (const e of p.ofKind('component')) expect(elementMeshes(p, e)!.solids.length).toBeGreaterThan(0);
     for (const e of p.ofKind('railing')) expect(elementMeshes(p, e)!.solids[0].positions.length).toBeGreaterThan(0);
+  });
+});
+
+describe('pièces délimitées', () => {
+  it('le contour suit les murs et signale une pièce ouverte', () => {
+    const p = new Project(sampleProject());
+    const sejour = p.ofKind('room').find((r) => r.name === 'Séjour')!;
+    const area0 = Math.abs(polygonArea(sejour.points));
+    expect(area0).toBeGreaterThan(40);
+    // Le mur de refend recule d'un mètre vers l'est : le séjour s'agrandit.
+    const ref = p.ofKind('wall', 'lvl-0').find((w) => w.typeId === 'wt-ref')!;
+    p.transact('m', () => moveElements(p, [ref.id], { x: 1, y: 0 }));
+    const area1 = Math.abs(polygonArea(p.get<'room'>(sejour.id)!.points));
+    expect(area1 - area0).toBeCloseTo(7.7, 2);
+    // Suppression d'un mur extérieur : la pièce n'est plus fermée.
+    const west = p.ofKind('wall', 'lvl-0').find((w) => w.a.x === 0 && w.b.x === 0)!;
+    p.transact('s', () => p.remove([west.id]));
+    expect(p.get<'room'>(sejour.id)!.notEnclosed).toBe(true);
+    p.undo();
+    expect(p.get<'room'>(sejour.id)!.notEnclosed).toBeFalsy();
   });
 });

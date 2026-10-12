@@ -1,68 +1,117 @@
 # OpenBIM Studio
 
-Modeleur BIM web inspiré de Revit. Vous dessinez en plan ; le modèle 3D, les élévations et les nomenclatures se mettent à jour automatiquement. Le projet s'exporte en IFC4.
+**Modeleur BIM libre et gratuit, inspiré de Revit.** Vous dessinez en plan ; le modèle 3D, les coupes, les élévations, les nomenclatures et les feuilles se mettent à jour automatiquement. Le projet s'échange en **IFC4**, **DXF**, **SVG**, **glTF** et **PNG**.
 
-## Démarrage
+Fonctionne dans le navigateur, hors ligne (application installable), et en **application de bureau** pour Windows, macOS et Linux.
+
+Licence **MIT** : utilisez-le, modifiez-le, partagez-le.
+
+## Installer
+
+| Plateforme | Comment |
+|---|---|
+| **Windows / macOS / Linux** | Téléchargez l'installateur dans les [Releases](../../releases) : `.exe` (installation ou portable), `.dmg`, `.AppImage` ou `.tar.gz`. |
+| **Navigateur** | Ouvrez la version publiée sur GitHub Pages, puis « Installer l'application » dans la barre d'adresse pour l'utiliser hors ligne. |
+| **Depuis les sources** | `npm install && npm run dev`, puis ouvrez http://localhost:5173 |
+
+Pour construire vous-même l'exécutable de bureau :
 
 ```bash
 npm install
-npm run dev        # http://localhost:5173
-npm test           # tests unitaires (Vitest)
-npm run build      # vérification des types + build de production dans dist/
+npm run build
+cd desktop
+npm install
+npm run dist         # installateurs pour le système courant, dans desktop/release/
 ```
-
-Au premier lancement, une maison R+1 de démonstration est chargée. Le projet est sauvegardé automatiquement dans le navigateur.
 
 ## Fonctionnalités
 
-| Domaine | Ce qui est disponible |
-|---|---|
-| **Modélisation** | Murs (ligne ou rectangle, en chaîne, ligne de justification axe/nu, raccords en angle et en T), portes et fenêtres hébergées dans les murs, poteaux rectangulaires ou circulaires, sols, toits (plat, 1 pan, 2 pans, 4 pans), escaliers droits (calcul des marches et formule de Blondel), quadrillages |
-| **Pièces** | Détection automatique en cliquant dans un espace fermé par des murs, ou contour dessiné ; surface et périmètre |
-| **Création rapide** | « Sol par murs » et « Toit par murs » (avec débord) à partir de l'emprise des murs |
-| **Vues** | Plans d'étage par niveau (plan de coupe à 1,20 m, niveau inférieur en grisé), vue 3D (orbite, styles visuels, arêtes, coupe horizontale), élévations Nord/Sud/Est/Ouest avec repères de niveaux, onglets de vues |
-| **Annotation** | Cotes alignées, étiquettes de pièces, repères de portes et fenêtres, cotes temporaires pendant le tracé |
-| **Édition** | Sélection (clic, fenêtre, capture), déplacement avec étirement des murs raccordés, poignées d'extrémités et de sommets, copier/coller, rotation, symétrie, annuler/rétablir (200 niveaux) |
-| **Accrochage** | Extrémités, milieux, sommets, intersections de quadrillages, point le plus proche, orthogonal (Maj pour forcer, Alt pour désactiver) ; saisie d'une longueur au clavier pendant un tracé |
-| **Propriétés** | Paramètres d'occurrence et de type (comme dans Revit), niveaux, unités (mm/cm/m) |
-| **Gestion** | Niveaux (ajout, altitude, hauteur, copie des murs extérieurs vers un autre niveau), éditeur de types de murs, de portes et de fenêtres |
-| **Nomenclatures** | Murs, portes, fenêtres, pièces et sols, avec totaux et export CSV |
-| **Fichiers** | Enregistrer/ouvrir (`.obim.json`), export **IFC4** (murs avec réservations, portes, fenêtres, dalles, toiture en B-rep, poteaux, escaliers, espaces), export **glTF** (`.glb`), export **PNG** de la vue |
+### Modélisation (onglet Architecture)
+- **Murs** : en ligne ou en rectangle, en chaîne, ligne de justification (axe ou nu). Les raccords en angle, en T et les jonctions multiples sont nettoyés automatiquement.
+  - **Contrainte supérieure** : la hauteur peut suivre un niveau, avec un décalage.
+  - **Attacher haut** : le haut du mur peut suivre la sous-face d'un toit (pignons fermés).
+  - **Murs-rideaux** : meneaux, traverses et vitrage.
+- **Portes, fenêtres et ouvertures** : hébergées dans les murs, avec inversion du sens et de l'ouverture.
+- **Sols** (dessinés ou générés depuis les murs) et **trémies** qui percent les sols.
+- **Toits** plats, à 1, 2 ou 4 pans (croupe), dessinés ou générés depuis les murs avec débord.
+- **Faux-plafonds** : clic dans une pièce ou contour dessiné.
+- **Escaliers droits** (calcul des marches et formule de Blondel), **garde-corps**, **poteaux**.
+- **Composants** : mobilier (lits, canapé, tables, bureau, armoire), sanitaires (WC, lavabo, baignoire, douche), cuisine, équipements, arbres, voiture.
+- **Pièces** : un clic dans un espace fermé crée la pièce et calcule sa surface exacte.
+- **Quadrillages** et **niveaux**.
 
-## Raccourcis (style Revit, en français)
+### Modification (onglet Modifier)
+- Aligner, Décaler, Déplacer, Copier (multiple), Rotation (angle saisi ou cliqué, accrochage à 15°), Symétrie (avec ou sans copie), Réseau linéaire.
+- Ajuster/prolonger pour former un angle, Prolonger jusqu'à une limite, Scinder.
+- Poignées d'extrémités et de sommets ; les murs raccordés s'étirent pour rester joints.
+- Copier/coller, annuler/rétablir sur 200 niveaux.
+
+### Saisie précise
+- Accrochage aux extrémités, milieux, sommets, centres, intersections de quadrillages, au point le plus proche et en orthogonal.
+- `Maj` force l'orthogonalité, `Alt` désactive l'accrochage.
+- Pendant un tracé, tapez une longueur au clavier (`450`, `4.5m`, `3200mm`) puis `Entrée`.
+- Cotes temporaires pendant le dessin ; outil **Mesurer** (segments, total, ΔX/ΔY, angle).
+
+### Annotation
+- Cotes alignées et **cotes de mur en chaîne** (extrémités et ouvertures en un clic).
+- Textes, étiquettes de pièces (nom, numéro, surface), repères de portes et fenêtres.
+
+### Vues
+- **Plans d'étage** : plan de coupe à 1,20 m, niveau inférieur en grisé, échelle de vue (1/20 à 1/500).
+- **Vue 3D** : orbite, styles visuels, arêtes, ombres, coupe horizontale.
+- **Coupes** : vues coupées avec remplissage des parties coupées (poché), rognées sur la ligne de coupe et sa profondeur.
+- **Élévations** Nord, Sud, Est et Ouest, avec repères de niveaux.
+- **Visibilité/Graphismes** (`VG`) : afficher ou masquer chaque catégorie, vue par vue.
+
+### Nomenclatures
+Murs (longueur, surface nette, volume), portes, fenêtres, pièces, sols et composants, avec totaux et export CSV.
+
+### Feuilles et exports
+- **Feuille A3** avec cartouche : projet, maître d'ouvrage, auteur, phase, échelle, date, nord, échelle graphique. Impression directe (ou PDF) et export SVG vectoriel.
+- **DXF** (AutoCAD R12, en mm) avec un calque par catégorie : MURS, PORTES, COTES…
+- **IFC4** : niveaux, murs avec réservations, murs-rideaux, portes, fenêtres, dalles percées, toitures, poteaux, escaliers, garde-corps, plafonds, mobilier, sanitaires et espaces. Validé avec IfcOpenShell : 0 erreur de schéma.
+- **glTF** (`.glb`) pour la visualisation ou les moteurs 3D, et **PNG** de la vue.
+
+## Raccourcis clavier (style Revit, en français)
 
 | Touches | Action | Touches | Action |
 |---|---|---|---|
-| `MU` | Mur | `PI` | Pièce |
-| `PO` | Porte | `CO` | Cote |
-| `FE` | Fenêtre | `QU` | Quadrillage |
-| `PT` | Poteau | `MO` | Modifier (sélection) |
-| `SO` | Sol | `ZE` | Zoom étendu |
-| `TO` | Toit | `RO` | Rotation de 90° |
-| `ES` | Escalier | `Suppr` | Supprimer |
-| `Ctrl+Z` / `Ctrl+Y` | Annuler / Rétablir | `Ctrl+C` / `Ctrl+V` | Copier / Coller |
-| `Ctrl+S` / `Ctrl+O` | Enregistrer / Ouvrir | `Échap`, clic droit | Terminer, puis revenir à la sélection |
+| `MU` `PO` `FE` | Mur, porte, fenêtre | `ME` | Mesurer |
+| `OU` `TR` | Ouverture, trémie | `AL` `DE` | Aligner, décaler |
+| `CP` `PT` | Composant, poteau | `AJ` `PR` `SC` | Angle, prolonger, scinder |
+| `SO` `TO` `FP` | Sol, toit, faux-plafond | `DP` `CC` `RO` | Déplacer, copier, rotation |
+| `ES` `GC` | Escalier, garde-corps | `SY` `RS` | Symétrie, réseau |
+| `PI` `QU` | Pièce, quadrillage | `AH` | Attacher le haut des murs |
+| `CO` `CM` | Cote, cotes de mur | `VG` `ZE` | Visibilité, zoom étendu |
+| `TX` `CE` | Texte, coupe | `MO` | Modifier (sélection) |
 
-En plan : molette pour zoomer, clic milieu ou clic droit glissé pour se déplacer.
+À cela s'ajoutent `Ctrl+Z`/`Ctrl+Y`, `Ctrl+C`/`Ctrl+V`, `Ctrl+A`, `Ctrl+S`/`Ctrl+O` et `Suppr`. `Échap` ou un clic droit termine la saisie en cours. En plan, la molette zoome et le clic milieu déplace la vue.
 
 ## Architecture
 
 ```
 src/
-  model/      Données et calculs purs (sans DOM) : types, géométrie, raccords de murs,
-              historique, détection de pièces, maillages 3D, nomenclatures
-  io/         Export IFC4 (STEP) et fichiers
-  tools/      Outils de dessin du plan (sélection, mur, ouvertures, contours…)
-  views/      Plan (Canvas 2D), 3D et élévations (Three.js), nomenclatures
-  ui/         Ruban, barre des options, arborescence, propriétés, boîtes de dialogue
-  app.ts      État de l'application (vue active, outil, sélection, options)
-  commands.ts Commandes (copier, rotation, symétrie, sol/toit par murs, niveaux)
+  model/      Cœur BIM sans DOM : types, géométrie, raccords de murs, historique,
+              contraintes, détection de pièces, maillages 3D, toits, opérations
+              de modification (edit.ts), bibliothèque de composants, nomenclatures
+  io/         IFC4 (STEP), SVG/DXF/feuilles (vector.ts), fichiers projet
+  tools/      Outils interactifs du plan : création (draw.ts), modification
+              (modify.ts), sélection (select.ts)
+  views/      Plan (Canvas 2D), 3D/élévations/coupes (Three.js), nomenclatures
+  ui/         Ruban, barre des options, arborescence, propriétés, dialogues
+desktop/      Application de bureau Electron et configuration des installateurs
+.github/      CI (tests + build), publication GitHub Pages, releases multiplateformes
 ```
 
-Toutes les longueurs sont stockées en mètres. Le modèle (`src/model`) ne dépend ni du DOM ni de Three.js : la même géométrie sert au rendu 3D, aux quantités et à l'export IFC.
+Toutes les longueurs sont stockées en mètres. La même géométrie sert au rendu 3D, aux quantités, aux exports et à l'IFC. Pour automatiser l'application, `window.openbim` donne accès à l'application depuis la console.
+
+## Contribuer
+
+Les contributions sont les bienvenues ; voir [CONTRIBUTING.md](CONTRIBUTING.md). `npm test` lance les tests unitaires (géométrie, raccords, contraintes, outils de modification, nomenclatures, IFC).
 
 ## Limites connues
 
-- Les murs ne s'attachent pas encore à la sous-face du toit : avec un toit à 2 pans, les pignons restent ouverts.
-- Pas de murs courbes, de familles paramétriques personnalisées, de feuilles de mise en page ni de travail collaboratif.
-- L'IFC est exporté, mais aucun fichier IFC ne peut être importé.
+- Les murs sont droits uniquement (pas de murs courbes).
+- Pas d'éditeur de familles paramétriques : la bibliothèque de composants est fixe.
+- L'IFC est seulement exporté, pas importé.
+- Pas de travail collaboratif en temps réel.
